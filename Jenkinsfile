@@ -132,20 +132,18 @@ pipeline {
         stage('8. Helm Deployment to Kubernetes') {
             steps {
                 echo "===> Deploying version ${IMAGE_VERSION} via Helm..."
-                withCredentials([file(credentialsId: "${KUBECONFIG_ID}", variable: 'KUBECONFIG')]) {
-                    sh '''
-                        echo "Upgrading Votex release via Helm..."
-                        helm upgrade --install votex ./charts/votex \
-                            --namespace votex \
-                            --create-namespace \
-                            --set vote.image.tag=${IMAGE_VERSION} \
-                            --set result.image.tag=${IMAGE_VERSION} \
-                            --set worker.image.tag=${IMAGE_VERSION} \
-                            --wait --timeout 5m0s || true
+                sh '''
+                    echo "Upgrading Votex release via Helm..."
+                    helm upgrade --install votex ./charts/votex \
+                        --namespace votex \
+                        --create-namespace \
+                        --set vote.image.tag=${IMAGE_VERSION} \
+                        --set result.image.tag=${IMAGE_VERSION} \
+                        --set worker.image.tag=${IMAGE_VERSION} \
+                        --wait --timeout 5m0s || true
 
-                        kubectl get pods,pvc,hpa,ingress -n votex
-                    '''
-                }
+                    kubectl get pods,pvc,hpa,ingress -n votex
+                '''
             }
         }
     }
