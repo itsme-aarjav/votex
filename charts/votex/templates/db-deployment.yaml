@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db
+  template:
+    metadata:
+      labels:
+        app: db
+    spec:
+      containers:
+      - name: postgres
+        image: "{{ .Values.db.image.repository }}:{{ .Values.db.image.tag }}"
+        imagePullPolicy: {{ .Values.db.image.pullPolicy }}
+        envFrom:
+        - secretRef:
+            name: {{ include "votex.fullname" . }}-db-secret
+        ports:
+        - containerPort: {{ .Values.db.service.port }}
+          name: postgres
+        resources:
+          {{- toYaml .Values.db.resources | nindent 10 }}
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U {{ .Values.db.credentials.username }}
+          initialDelaySeconds: {{ .Values.db.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.db.probes.liveness.periodSeconds }}
+        readinessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - pg_isready -U {{ .Values.db.credentials.username }}
+          initialDelaySeconds: {{ .Values.db.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.db.probes.readiness.periodSeconds }}
+        volumeMounts:
+        - mountPath: /var/lib/postgresql/data
+          name: db-data
+      volumes:
+      - name: db-data
+        {{- if .Values.db.persistence.enabled }}
+        persistentVolumeClaim:
+          claimName: {{ include "votex.fullname" . }}-db-pvc
+        {{- else }}
+        emptyDir: {}
+        {{- end }}

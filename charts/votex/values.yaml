@@ -1,0 +1,177 @@
+# Default values for Votex Helm Chart.
+# This is a YAML-formatted file.
+
+global:
+  environment: production
+  imagePullPolicy: IfNotPresent
+
+# ==================== VOTE SERVICE (PYTHON / FLASK) ====================
+vote:
+  replicaCount: 2
+  image:
+    repository: aarjavjainn/votex-vote
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 5000
+    targetPort: 80
+    nodePort: 31002
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  probes:
+    liveness:
+      path: /api/health
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      path: /api/health
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  env:
+    optionA: "Cats"
+    optionB: "Dogs"
+
+# ==================== RESULT SERVICE (NODE.JS) ====================
+result:
+  replicaCount: 2
+  image:
+    repository: aarjavjainn/votex-result
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: NodePort
+    port: 5001
+    targetPort: 80
+    nodePort: 31001
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  probes:
+    liveness:
+      path: /
+      initialDelaySeconds: 15
+      periodSeconds: 10
+      timeoutSeconds: 5
+      failureThreshold: 3
+    readiness:
+      path: /
+      initialDelaySeconds: 10
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 2
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 75
+
+# ==================== WORKER DAEMON (.NET CORE) ====================
+worker:
+  replicaCount: 1
+  image:
+    repository: aarjavjainn/votex-worker
+    tag: latest
+    pullPolicy: IfNotPresent
+  resources:
+    limits:
+      cpu: 300m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+# ==================== REDIS IN-MEMORY QUEUE ====================
+redis:
+  image:
+    repository: redis
+    tag: alpine
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 6379
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+  probes:
+    liveness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 5
+      periodSeconds: 5
+
+# ==================== POSTGRESQL DATABASE ====================
+db:
+  image:
+    repository: postgres
+    tag: 15-alpine
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 5432
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 150m
+      memory: 256Mi
+  persistence:
+    enabled: true
+    size: 1Gi
+    accessMode: ReadWriteOnce
+    # storageClass: "standard" # Leave unset to use default cluster storage class
+  credentials:
+    username: postgres
+    password: postgres
+    database: postgres
+  probes:
+    liveness:
+      initialDelaySeconds: 20
+      periodSeconds: 10
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 5
+
+# ==================== INGRESS CONTROLLER ====================
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/proxy-body-size: "16m"
+  hosts:
+    - host: vote.votex.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: vote
+    - host: result.votex.local
+      paths:
+        - path: /
+          pathType: Prefix
+          service: result

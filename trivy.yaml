@@ -1,0 +1,25 @@
+# Trivy Security Scanner Configuration for Votex
+# Scans filesystem, vulnerabilities, misconfigurations, and secrets
+
+severity:
+  - HIGH
+  - CRITICAL
+
+exit-code: 1
+
+scan:
+  scanners:
+    - vuln
+    - misconfig
+    - secret
+
+format: table
+
+vulnerability:
+  ignore-unfixed: true
+
+misconfiguration:
+  scanners:
+    - dockerfile
+    - kubernetes
+    - helm

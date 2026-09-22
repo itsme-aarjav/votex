@@ -1,0 +1,55 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: votex-alert-rules
+  labels:
+    role: alert-rules
+    app: votex
+spec:
+  groups:
+  - name: VotexApplicationAlerts
+    rules:
+    - alert: VotexPodCrashLooping
+      expr: rate(kube_pod_container_status_restarts_total{namespace="default", container=~"vote|result|worker|postgres|redis"}[5m]) * 60 > 2
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Votex Pod {{ $labels.pod }} is crash looping"
+        description: "Pod {{ $labels.pod }} in container {{ $labels.container }} has restarted more than 2 times in the last 5 minutes."
+
+    - alert: VotexHighCPUUsage
+      expr: sum(rate(container_cpu_usage_seconds_total{namespace="default", container=~"vote|result|worker"}[5m])) by (pod) > 0.4
+      for: 3m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High CPU usage on {{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} CPU usage is exceeding 80% of its requested quota."
+
+    - alert: VotexHighMemoryUsage
+      expr: sum(container_memory_working_set_bytes{namespace="default", container=~"vote|result|worker"}) by (pod) / (256 * 1024 * 1024) > 0.85
+      for: 3m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High Memory usage on {{ $labels.pod }}"
+        description: "Pod {{ $labels.pod }} memory usage is above 85% of its limit."
+
+    - alert: VotexDatabaseDown
+      expr: kube_deployment_status_replicas_available{namespace="default", deployment="db"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "PostgreSQL Database is unavailable"
+        description: "There are no available database pods running for the Votex platform."
+
+    - alert: VotexRedisDown
+      expr: kube_deployment_status_replicas_available{namespace="default", deployment="redis"} == 0
+      for: 1m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Redis Queue is unavailable"
+        description: "Redis in-memory message broker is down or unreachable."
