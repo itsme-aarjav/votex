@@ -71,15 +71,14 @@ pipeline {
         stage('3. SonarQube Code Quality Analysis') {
             steps {
                 echo "===> Performing Static Application Security Testing (SAST)..."
-                withSonarQubeEnv('SonarQubeServer') {
-                    sh '''
-                        sonar-scanner \
-                            -Dsonar.projectKey=votex-platform \
-                            -Dsonar.projectName="Votex - Distributed Polling Platform" \
-                            -Dsonar.projectVersion=${IMAGE_VERSION} \
-                            -Dsonar.sources=vote,result,worker || true
-                    '''
-                }
+                sh '''
+                    sonar-scanner \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.projectKey=votex-platform \
+                        -Dsonar.projectName="Votex - Distributed Polling Platform" \
+                        -Dsonar.projectVersion=${IMAGE_VERSION} \
+                        -Dsonar.sources=vote,result,worker || true
+                '''
             }
         }
 
