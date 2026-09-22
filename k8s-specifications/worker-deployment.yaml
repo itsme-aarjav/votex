@@ -16,4 +16,5 @@ spec:
     spec:
       containers:
       - image: aarjavjainn/votex-worker:latest
+        imagePullPolicy: IfNotPresent
         name: worker

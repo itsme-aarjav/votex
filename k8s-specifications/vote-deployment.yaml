@@ -16,6 +16,7 @@ spec:
     spec:
       containers:
       - image: aarjavjainn/votex-vote:latest
+        imagePullPolicy: IfNotPresent
         name: vote
         ports:
         - containerPort: 80
