@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Votex - Next-Gen Community Polling</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="{{ url_for('static', filename='stylesheets/style.css') }}" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  </head>
+  <body>
+    <div class="app-layout">
+      <!-- Left Sidebar Navigation -->
+      <aside class="sidebar">
+        <a href="/" class="brand-logo">
+          <div class="logo-icon">
+            <i class="fa-solid fa-square-poll-vertical"></i>
+          </div>
+          <div>
+            <div class="brand-text">Votex <span class="brand-badge">PRO</span></div>
+          </div>
+        </a>
+
+        <ul class="nav-menu">
+          <li class="nav-heading">Platform</li>
+          <li>
+            <button class="nav-link active" onclick="switchNav(this, 'explore')">
+              <i class="fa-solid fa-compass"></i>
+              <span>Explore Polls</span>
+            </button>
+          </li>
+          <li>
+            <a id="navAnalyticsLink" href="http://localhost:5001" target="_blank" class="nav-link">
+              <i class="fa-solid fa-chart-line"></i>
+              <span>Live Analytics</span>
+              <span class="link-badge">LIVE</span>
+            </a>
+          </li>
+          <li>
+            <button class="nav-link" onclick="switchNav(this, 'trending')">
+              <i class="fa-solid fa-fire-flame-curved"></i>
+              <span>Trending</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-link" onclick="openCreateModal()">
+              <i class="fa-solid fa-circle-plus"></i>
+              <span>Create Poll</span>
+            </button>
+          </li>
+
+          <li class="nav-heading">Community</li>
+          <li>
+            <button class="nav-link" onclick="switchNav(this, 'leaderboard')">
+              <i class="fa-solid fa-trophy"></i>
+              <span>Leaderboard</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-link" onclick="switchNav(this, 'activity')">
+              <i class="fa-solid fa-clock-rotate-left"></i>
+              <span>Recent Activity</span>
+            </button>
+          </li>
+        </ul>
+
+      </aside>
+
+      <!-- Main Application Wrapper -->
+      <div class="main-wrapper">
+        <!-- Top Navigation Bar -->
+        <header class="top-header">
+          <div class="header-left-group">
+            <div class="header-search">
+              <i class="fa-solid fa-magnifying-glass" style="color: #64748b; font-size: 13px;"></i>
+              <input type="text" id="pollSearchInput" placeholder="Search polls, categories, topics..." onkeyup="filterPolls()" />
+              <span class="search-shortcut-badge">⌘K</span>
+            </div>
+          </div>
+
+          <div class="header-actions">
+            <a id="headerAnalyticsLink" href="http://localhost:5001" target="_blank" class="btn-action-pill btn-secondary-pill">
+              <i class="fa-solid fa-chart-simple" style="color: #4ade80;"></i>
+              <span>Live Analytics</span>
+            </a>
+            <button class="btn-action-pill btn-primary-pill" onclick="openCreateModal()">
+              <i class="fa-solid fa-plus"></i>
+              <span>New Poll</span>
+            </button>
+
+            <div class="user-profile-badge" id="headerProfileBadge" onclick="handleProfileBadgeClick()" title="View Profile & Settings">
+              <div class="user-profile-avatar" id="headerUserAvatar" data-bg="{{ current_user.bg if current_user else '#3b82f6' }}">{{ current_user.avatar if current_user else '👨🏼‍🚀' }}</div>
+              <span class="user-profile-name" id="headerUserName">{{ current_user.display_name if current_user else 'Sign In' }}</span>
+              <i class="fa-solid fa-chevron-down user-profile-chevron"></i>
+            </div>
+          </div>
+        </header>
+
+        <!-- Main Dashboard Body -->
+        <main class="dashboard-body">
+          <!-- Left Column -->
+          <div class="content-left">
+            <!-- Featured Poll Hero Card -->
+            <div class="featured-hero-card" id="featuredHeroCard">
+              <div class="hero-glow-accent"></div>
+
+              <div class="hero-header-row">
+                <div class="creator-tag">
+                  <div class="creator-avatar"><i class="fa-solid fa-user-astronaut"></i></div>
+                  <span id="heroCreator">Momon</span>
+                </div>
+                <div class="hero-time-badge">
+                  <i class="fa-regular fa-clock"></i>
+                  <span id="heroTime">5 Minutes ago</span>
+                </div>
+              </div>
+
+              <!-- Media Photo Box -->
+              <div class="hero-media-container" id="heroMediaBox" onclick="toggleHeroImage()" style="cursor: pointer;" title="Click to view details">
+                <img id="heroImage" src="{{ url_for('static', filename='images/cat.jpg') }}" alt="Poll Hero Image" />
+              </div>
+
+              <!-- Question & Greeting -->
+              <div class="hero-texts">
+                <div class="hero-greeting" id="heroGreeting">Hi Faza!</div>
+                <div class="hero-question" id="heroQuestion">Do you like this {{option_a}}?</div>
+              </div>
+
+              <!-- Interactive Voting Actions -->
+              <form id="voteForm" method="POST" action="/" class="hero-voting-actions">
+                <button type="button" id="btn-option-a" onclick="castVote('a')" class="vote-action-btn">
+                  <span id="txt-option-a">Yes! ({{option_a}})</span>
+                </button>
+                <button type="button" id="btn-option-b" onclick="castVote('b')" class="vote-action-btn btn-no">
+                  <span id="txt-option-b">No! ({{option_b}})</span>
+                </button>
+                <input type="hidden" name="vote" id="voteInput" value="" />
+              </form>
+
+              <!-- Footer navigation inside card -->
+              <div class="hero-footer-row">
+                <div class="poll-dots-indicator">
+                  <div class="poll-dot active" onclick="selectPollByIdx(0)" id="dot-0"></div>
+                  <div class="poll-dot" onclick="selectPollByIdx(1)" id="dot-1"></div>
+                  <div class="poll-dot" onclick="selectPollByIdx(2)" id="dot-2"></div>
+                </div>
+
+                <div class="hero-meta-links">
+                  <button class="hero-meta-btn" onclick="openShareModal()">
+                    <i class="fa-solid fa-share-nodes"></i> Share
+                  </button>
+                  <button class="hero-meta-btn" onclick="toggleBookmark(this)">
+                    <i class="fa-regular fa-bookmark"></i> Save
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Multi Polls Explorer Grid -->
+            <div>
+              <div class="section-header">
+                <div class="section-title">Explore Trending Polls</div>
+                <div style="font-size: 13px; color: #4ade80; font-weight: 700; cursor: pointer;">View All (3)</div>
+              </div>
+
+              <div class="polls-grid" id="pollsGridContainer">
+                <!-- Poll Card 1: Cats vs Dogs -->
+                <div class="poll-card-item selected-poll" id="grid-poll-0" onclick="selectPollByIdx(0)">
+                  <div class="poll-thumbnail">
+                    <img src="{{ url_for('static', filename='images/cat.jpg') }}" alt="Cats" />
+                  </div>
+                  <div>
+                    <div class="card-title">Do you like this Cat? (Cats vs Dogs)</div>
+                    <div class="card-meta-row" style="margin-top: 6px;">
+                      <span><i class="fa-solid fa-user" style="margin-right: 4px;"></i> Momon</span>
+                      <span style="color: #4ade80;"><i class="fa-solid fa-bolt" style="margin-right: 4px;"></i> Live Active</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Poll Card 2: Vintage Beetle Car -->
+                <div class="poll-card-item" id="grid-poll-1" onclick="selectPollByIdx(1)">
+                  <div class="poll-thumbnail">
+                    <img src="{{ url_for('static', filename='images/car.jpg') }}" alt="Vintage Car" />
+                  </div>
+                  <div>
+                    <div class="card-title">Do you like this Classic Beetle Car?</div>
+                    <div class="card-meta-row" style="margin-top: 6px;">
+                      <span><i class="fa-solid fa-user" style="margin-right: 4px;"></i> Aarjav</span>
+                      <span style="color: #60a5fa;"><i class="fa-solid fa-car" style="margin-right: 4px;"></i> Autos</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Poll Card 3: Coffee vs Tea -->
+                <div class="poll-card-item" id="grid-poll-2" onclick="selectPollByIdx(2)">
+                  <div class="poll-thumbnail" style="background: linear-gradient(135deg, #b45309, #78350f); display: flex; align-items: center; justify-content: center; font-size: 50px;">
+                    ☕
+                  </div>
+                  <div>
+                    <div class="card-title">Morning Fuel: Coffee or Tea?</div>
+                    <div class="card-meta-row" style="margin-top: 6px;">
+                      <span><i class="fa-solid fa-user" style="margin-right: 4px;"></i> Nola</span>
+                      <span style="color: #f59e0b;"><i class="fa-solid fa-mug-hot" style="margin-right: 4px;"></i> Lifestyle</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Analytics & Comments -->
+          <div class="content-right">
+            <!-- Analytics Summary Widget -->
+            <div class="analytics-widget-card">
+              <div class="widget-title">
+                <span>Real-Time Poll Pulse</span>
+                <a id="sideAnalyticsLink" href="http://localhost:5001" target="_blank" style="font-size: 12px; color: #4ade80; text-decoration: none; font-weight: 700;">
+                  Full Stats <i class="fa-solid fa-arrow-up-right-from-square"></i>
+                </a>
+              </div>
+
+              <div class="metric-grid-compact">
+                <div class="metric-box-blue">
+                  <div class="metric-num" id="totalVotesCount">241</div>
+                  <div class="metric-lbl">Total Impressions</div>
+                </div>
+                <div class="metric-box-blue" style="background: #253384;">
+                  <div class="metric-num" id="shareCount">12</div>
+                  <div class="metric-lbl">Total Shares</div>
+                </div>
+              </div>
+
+              <!-- Live Progress Bars -->
+              <div class="progress-block">
+                <div class="progress-track">
+                  <div class="progress-fill-green" id="barFillA" style="width: 65%;"></div>
+                  <div class="progress-text-row">
+                    <span id="labelOptionA" style="color: #064e3b;">Yes! ({{option_a}})</span>
+                    <span id="scoreTextA" style="color: #064e3b;">65%</span>
+                  </div>
+                </div>
+
+                <div class="progress-track">
+                  <div class="progress-fill-blue" id="barFillB" style="width: 35%;"></div>
+                  <div class="progress-text-row">
+                    <span id="labelOptionB">No! ({{option_b}})</span>
+                    <span id="scoreTextB">35%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Discussion / Community Comments -->
+            <div class="comments-card">
+              <div class="widget-title">
+                <span>Community Comments</span>
+                <span id="commentCountBadge" style="font-size: 11px; background: rgba(74,222,128,0.15); color: #4ade80; padding: 2px 8px; border-radius: 12px;">4</span>
+              </div>
+
+              <!-- Comment Input -->
+              <div class="comment-input-box">
+                <input type="text" id="newCommentInput" placeholder="Write a comment..." onkeydown="if(event.key==='Enter') postComment()" />
+                <button class="btn-send-comment" onclick="postComment()" title="Post Comment">
+                  <i class="fa-solid fa-paper-plane" style="font-size: 13px;"></i>
+                </button>
+              </div>
+
+              <!-- Comments List -->
+              <div class="comments-list" id="commentsContainer">
+                {% for c in initial_comments or [] %}
+                <div class="comment-item">
+                  <div class="comment-avatar" data-bg="{{c.bg}}">{{c.avatar}}</div>
+                  <div class="comment-body">
+                    <div class="comment-author-row">
+                      <span>{{c.author}}</span>
+                      <span class="comment-time">{{c.time}}</span>
+                    </div>
+                    <div class="comment-msg">{{c.text}}</div>
+                  </div>
+                </div>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+        </main>
+
+        <!-- Platform Dashboard Footer -->
+        <footer class="dashboard-footer">
+          <div class="footer-top-grid">
+            <div class="footer-brand-col">
+              <div class="footer-brand">
+                <div class="footer-logo-icon">
+                  <i class="fa-solid fa-square-poll-vertical"></i>
+                </div>
+                <div>
+                  <div class="footer-brand-title">Votex <span class="brand-badge">PRO</span></div>
+                  <div class="footer-brand-sub">Real-Time Community Polling Platform</div>
+                </div>
+              </div>
+              <p class="footer-desc">
+                Engage in live community polls, cast your vote seamlessly, and discover instant real-time polling insights across trending topics.
+              </p>
+              <div class="footer-tech-stack">
+                <span class="tech-pill"><i class="fa-solid fa-bolt"></i> Real-Time Sync</span>
+                <span class="tech-pill"><i class="fa-solid fa-shield-halved"></i> Instant & Anonymous</span>
+                <span class="tech-pill"><i class="fa-solid fa-chart-line"></i> Live Analytics</span>
+                <span class="tech-pill"><i class="fa-solid fa-users"></i> Community Driven</span>
+              </div>
+            </div>
+
+            <div class="footer-links-col">
+              <div class="footer-col-title">Explore Categories</div>
+              <ul class="footer-links-list">
+                <li><a href="javascript:void(0)" onclick="switchNav(document.querySelectorAll('.nav-link')[0], 'all')"><i class="fa-solid fa-compass"></i> Explore All Polls</a></li>
+                <li><a href="javascript:void(0)" onclick="switchNav(document.querySelectorAll('.nav-link')[1], 'tech')"><i class="fa-solid fa-laptop-code"></i> Tech & Engineering</a></li>
+                <li><a href="javascript:void(0)" onclick="switchNav(document.querySelectorAll('.nav-link')[2], 'gaming')"><i class="fa-solid fa-gamepad"></i> Gaming & Pop Culture</a></li>
+                <li><a href="javascript:void(0)" onclick="switchNav(document.querySelectorAll('.nav-link')[4], 'leaderboard')"><i class="fa-solid fa-trophy"></i> Global Leaderboard</a></li>
+              </ul>
+            </div>
+
+            <div class="footer-links-col">
+              <div class="footer-col-title">Quick Actions</div>
+              <ul class="footer-links-list">
+                <li><a href="http://localhost:5001" target="_blank"><i class="fa-solid fa-chart-pie"></i> Real-Time Analytics</a></li>
+                <li><a href="javascript:void(0)" onclick="openCreateModal()"><i class="fa-solid fa-plus-circle"></i> Create New Community Poll</a></li>
+                <li><a href="javascript:void(0)" onclick="handleProfileBadgeClick()"><i class="fa-solid fa-user-gear"></i> User Profile & Settings</a></li>
+                <li><a href="javascript:void(0)" onclick="switchNav(document.querySelectorAll('.nav-link')[5], 'activity')"><i class="fa-solid fa-clock-rotate-left"></i> Recent Activity</a></li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="footer-bottom-row">
+            <div class="footer-copyright">
+              © 2026 <strong>Votex Platform</strong>. Built for real-time community engagement.
+            </div>
+            <div class="footer-node-pill">
+              <i class="fa-solid fa-circle-check" style="color: #4ade80;"></i> Platform Status: <span class="latency-good">All Systems Operational</span>
+            </div>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Create Poll Modal -->
+    <div class="modal-overlay" id="createPollModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-title">Create New Poll</div>
+          <button class="btn-close-modal" onclick="closeCreateModal()">&times;</button>
+        </div>
+        <form onsubmit="handleCreatePoll(event)">
+          <div class="form-group">
+            <label class="form-label">Poll Question</label>
+            <input type="text" id="newPollTitle" class="form-input" placeholder="e.g. Which framework is best?" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Option A</label>
+            <input type="text" id="newPollOptA" class="form-input" placeholder="e.g. React" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label">Option B</label>
+            <input type="text" id="newPollOptB" class="form-input" placeholder="e.g. Vue" required />
+          </div>
+          <button type="submit" class="btn-action-pill btn-primary-pill" style="width: 100%; justify-content: center; margin-top: 10px;">
+            Publish Poll
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Share Modal -->
+    <div class="modal-overlay" id="shareModal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <div class="modal-title">Share this Poll</div>
+          <button class="btn-close-modal" onclick="closeShareModal()">&times;</button>
+        </div>
+        <p style="font-size: 13px; color: #94a3b8; margin-bottom: 14px;">Invite your friends and community to vote on this poll.</p>
+        <div class="form-group">
+          <input type="text" id="shareLinkInput" class="form-input" value="" readonly />
+        </div>
+        <button class="btn-action-pill btn-primary-pill" onclick="copyShareLink()" style="width: 100%; justify-content: center;">
+          <i class="fa-solid fa-copy"></i> Copy Link
+        </button>
+      </div>
+    </div>
+
+    <!-- ================= AUTH MODAL (Sign In & Create Account) ================= -->
+    <div class="modal-overlay" id="authModal">
+      <div class="modal-content auth-modal-content">
+        <div class="auth-header">
+          <button class="profile-close-btn" onclick="closeAuthModal()">&times;</button>
+          <div class="logo-badge">
+            <i class="fa-solid fa-square-poll-vertical"></i>
+          </div>
+          <div class="auth-title" id="authModalTitle">Welcome to Votex</div>
+          <div class="auth-subtitle" id="authModalSubtitle">Sign in or create an account to vote & publish polls</div>
+        </div>
+
+        <div class="auth-tabs">
+          <button class="auth-tab-btn active" id="tabBtnLogin" onclick="switchAuthTab('login')">
+            <i class="fa-solid fa-right-to-bracket"></i> Sign In
+          </button>
+          <button class="auth-tab-btn" id="tabBtnRegister" onclick="switchAuthTab('register')">
+            <i class="fa-solid fa-user-plus"></i> Create Account
+          </button>
+        </div>
+
+        <div class="auth-body">
+          <div class="auth-alert" id="authAlertBox">
+            <i class="fa-solid fa-circle-exclamation"></i>
+            <span id="authAlertMsg">Alert message</span>
+          </div>
+
+          <!-- SIGN IN FORM -->
+          <form id="loginForm" onsubmit="handleLogin(event)">
+            <div class="form-group">
+              <label class="form-label">Username</label>
+              <input type="text" id="loginUsername" class="form-input" placeholder="e.g. faza" required autocomplete="username" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Password</label>
+              <input type="password" id="loginPassword" class="form-input" placeholder="Enter your password" required autocomplete="current-password" />
+            </div>
+            <button type="submit" id="btnLoginSubmit" class="btn-action-pill btn-primary-pill" style="width: 100%; justify-content: center; margin-top: 14px;">
+              <i class="fa-solid fa-right-to-bracket"></i> Sign In to Account
+            </button>
+
+            <!-- Quick Demo Switcher -->
+            <div class="quick-demo-accounts">
+              <div class="quick-demo-title">Or Try Instant Demo Account:</div>
+              <div class="demo-account-pills">
+                <button type="button" class="btn-demo-pill" onclick="loginAsDemo('faza', 'faza123')">
+                  <span>👨🏼‍🚀</span> Faza (Explorer)
+                </button>
+                <button type="button" class="btn-demo-pill" onclick="loginAsDemo('momon', 'momon123')">
+                  <span>👩🏻‍💻</span> Momon (Lead)
+                </button>
+              </div>
+            </div>
+          </form>
+
+          <!-- CREATE ACCOUNT FORM -->
+          <form id="registerForm" style="display: none;" onsubmit="handleRegister(event)">
+            <div class="form-group">
+              <label class="form-label">Display Name</label>
+              <input type="text" id="regDisplayName" class="form-input" placeholder="e.g. Alex River" required />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Username</label>
+              <input type="text" id="regUsername" class="form-input" placeholder="e.g. alexriver" required autocomplete="username" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email Address</label>
+              <input type="email" id="regEmail" class="form-input" placeholder="e.g. alex@example.com" />
+            </div>
+            <div class="form-group">
+              <label class="form-label">Password</label>
+              <input type="password" id="regPassword" class="form-input" placeholder="Minimum 4 characters" minlength="4" required autocomplete="new-password" />
+            </div>
+
+            <!-- Avatar & Background Selector -->
+            <div class="avatar-selector-box">
+              <label class="form-label">Choose Avatar & Accent</label>
+              <div class="avatar-preview-wrapper">
+                <div class="avatar-selected-preview" id="regAvatarPreview" style="background-color: #3b82f6;">👨🏼‍🚀</div>
+                <div style="flex: 1;">
+                  <div class="avatar-options-grid">
+                    <button type="button" class="avatar-opt-btn selected" onclick="selectRegAvatar('👨🏼‍🚀', this)">👨🏼‍🚀</button>
+                    <button type="button" class="avatar-opt-btn" onclick="selectRegAvatar('👩🏻‍💻', this)">👩🏻‍💻</button>
+                    <button type="button" class="avatar-opt-btn" onclick="selectRegAvatar('🧑🏻‍🎨', this)">🧑🏻‍🎨</button>
+                    <button type="button" class="avatar-opt-btn" onclick="selectRegAvatar('🦁', this)">🦁</button>
+                    <button type="button" class="avatar-opt-btn" onclick="selectRegAvatar('🚀', this)">🚀</button>
+                    <button type="button" class="avatar-opt-btn" onclick="selectRegAvatar('🐱', this)">🐱</button>
+                    <button type="button" class="avatar-opt-btn" onclick="selectRegAvatar('🦊', this)">🦊</button>
+                    <button type="button" class="avatar-opt-btn" onclick="selectRegAvatar('⚡', this)">⚡</button>
+                  </div>
+                  <div class="color-swatches-row">
+                    <button type="button" class="color-swatch-btn selected" style="background: #3b82f6;" onclick="selectRegColor('#3b82f6', this)"></button>
+                    <button type="button" class="color-swatch-btn" style="background: #ec4899;" onclick="selectRegColor('#ec4899', this)"></button>
+                    <button type="button" class="color-swatch-btn" style="background: #10b981;" onclick="selectRegColor('#10b981', this)"></button>
+                    <button type="button" class="color-swatch-btn" style="background: #f59e0b;" onclick="selectRegColor('#f59e0b', this)"></button>
+                    <button type="button" class="color-swatch-btn" style="background: #8b5cf6;" onclick="selectRegColor('#8b5cf6', this)"></button>
+                    <button type="button" class="color-swatch-btn" style="background: #ef4444;" onclick="selectRegColor('#ef4444', this)"></button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Short Bio / Tagline</label>
+              <input type="text" id="regBio" class="form-input" placeholder="e.g. Technology fan and active poll voter" />
+            </div>
+
+            <button type="submit" id="btnRegSubmit" class="btn-action-pill btn-primary-pill" style="width: 100%; justify-content: center; margin-top: 10px;">
+              <i class="fa-solid fa-user-check"></i> Create Account & Sign In
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= FULL PROFILE MODAL ================= -->
+    <div class="modal-overlay" id="profileModal">
+      <div class="modal-content profile-modal-content">
+        <!-- Profile Banner -->
+        <div class="profile-hero-banner" id="profileHeroBanner">
+          <button class="profile-close-btn" onclick="closeProfileModal()">&times;</button>
+        </div>
+
+        <!-- Identity & Header -->
+        <div class="profile-header-main">
+          <div class="profile-avatar-row">
+            <div class="profile-avatar-large-box">
+              <div class="profile-avatar-large" id="profAvatarBig" style="background-color: #3b82f6;">👨🏼‍🚀</div>
+              <div class="profile-level-badge" id="profLevelBadge">Level 4</div>
+            </div>
+            <div class="profile-actions-top">
+              <button class="btn-profile-subtle" onclick="switchProfileTab('edit')">
+                <i class="fa-solid fa-pen-to-square"></i> Edit
+              </button>
+              <button class="btn-profile-logout" onclick="handleLogout()">
+                <i class="fa-solid fa-arrow-right-from-bracket"></i> Logout
+              </button>
+            </div>
+          </div>
+
+          <div class="profile-name-title">
+            <span id="profDisplayName">Faza</span>
+            <span class="profile-role-tag" id="profRoleTag">Pro Pollster</span>
+          </div>
+
+          <div class="profile-handle-row">
+            <span><i class="fa-solid fa-at" style="font-size: 11px;"></i> <span id="profUsername">faza</span></span>
+            <span>&bull;</span>
+            <span><i class="fa-regular fa-calendar-check"></i> Joined <span id="profJoinedDate">Jan 2026</span></span>
+          </div>
+
+          <div class="profile-bio-text" id="profBioText">
+            Lead explorer & cloud architect at VoteVerse. Always voting for Cats!
+          </div>
+        </div>
+
+        <!-- KPI Stats Bar -->
+        <div class="profile-stats-strip">
+          <div class="profile-kpi-card">
+            <div class="profile-kpi-val" id="profKpiVotes" style="color: #60a5fa;">18</div>
+            <div class="profile-kpi-lbl">Votes Cast</div>
+          </div>
+          <div class="profile-kpi-card">
+            <div class="profile-kpi-val" id="profKpiPolls" style="color: #4ade80;">3</div>
+            <div class="profile-kpi-lbl">Polls Created</div>
+          </div>
+          <div class="profile-kpi-card">
+            <div class="profile-kpi-val" id="profKpiComments" style="color: #f59e0b;">7</div>
+            <div class="profile-kpi-lbl">Comments</div>
+          </div>
+          <div class="profile-kpi-card">
+            <div class="profile-kpi-val" id="profKpiBookmarks" style="color: #c084fc;">2</div>
+            <div class="profile-kpi-lbl">Saved</div>
+          </div>
+        </div>
+
+        <!-- Navigation Tab Bar -->
+        <div class="profile-tab-bar">
+          <button class="profile-tab-item active" id="profTabBtnActivity" onclick="switchProfileTab('activity')">
+            <i class="fa-solid fa-bolt"></i> Activity Feed
+          </button>
+          <button class="profile-tab-item" id="profTabBtnPolls" onclick="switchProfileTab('polls')">
+            <i class="fa-solid fa-square-poll-vertical"></i> My Polls
+          </button>
+          <button class="profile-tab-item" id="profTabBtnBookmarks" onclick="switchProfileTab('bookmarks')">
+            <i class="fa-solid fa-bookmark"></i> Bookmarks
+          </button>
+          <button class="profile-tab-item" id="profTabBtnEdit" onclick="switchProfileTab('edit')">
+            <i class="fa-solid fa-sliders"></i> Edit Profile
+          </button>
+        </div>
+
+        <!-- Tab Body Content -->
+        <div class="profile-tab-scroll">
+          <!-- Pane 1: Activity -->
+          <div class="profile-tab-panel active" id="profPaneActivity">
+            <div class="activity-timeline" id="profileActivityList">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Pane 2: My Polls -->
+          <div class="profile-tab-panel" id="profPanePolls">
+            <div id="profileMyPollsList">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Pane 3: Bookmarks -->
+          <div class="profile-tab-panel" id="profPaneBookmarks">
+            <div id="profileBookmarksList">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Pane 4: Edit Profile Form -->
+          <div class="profile-tab-panel" id="profPaneEdit">
+            <form id="profileEditForm" onsubmit="saveProfileChanges(event)">
+              <div class="form-group">
+                <label class="form-label">Display Name</label>
+                <input type="text" id="editDisplayName" class="form-input" required />
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Role Title / Badge</label>
+                <input type="text" id="editRole" class="form-input" placeholder="e.g. Senior Pollster" />
+              </div>
+
+              <!-- Avatar & Color Picker -->
+              <div class="avatar-selector-box">
+                <label class="form-label">Avatar Emoji & Color</label>
+                <div class="avatar-preview-wrapper">
+                  <div class="avatar-selected-preview" id="editAvatarPreview" style="background-color: #3b82f6;">👨🏼‍🚀</div>
+                  <div style="flex: 1;">
+                    <div class="avatar-options-grid">
+                      <button type="button" class="avatar-opt-btn" onclick="selectEditAvatar('👨🏼‍🚀', this)">👨🏼‍🚀</button>
+                      <button type="button" class="avatar-opt-btn" onclick="selectEditAvatar('👩🏻‍💻', this)">👩🏻‍💻</button>
+                      <button type="button" class="avatar-opt-btn" onclick="selectEditAvatar('🧑🏻‍🎨', this)">🧑🏻‍🎨</button>
+                      <button type="button" class="avatar-opt-btn" onclick="selectEditAvatar('🦁', this)">🦁</button>
+                      <button type="button" class="avatar-opt-btn" onclick="selectEditAvatar('🚀', this)">🚀</button>
+                      <button type="button" class="avatar-opt-btn" onclick="selectEditAvatar('🐱', this)">🐱</button>
+                      <button type="button" class="avatar-opt-btn" onclick="selectEditAvatar('🦊', this)">🦊</button>
+                      <button type="button" class="avatar-opt-btn" onclick="selectEditAvatar('⚡', this)">⚡</button>
+                    </div>
+                    <div class="color-swatches-row">
+                      <button type="button" class="color-swatch-btn" style="background: #3b82f6;" onclick="selectEditColor('#3b82f6', this)"></button>
+                      <button type="button" class="color-swatch-btn" style="background: #ec4899;" onclick="selectEditColor('#ec4899', this)"></button>
+                      <button type="button" class="color-swatch-btn" style="background: #10b981;" onclick="selectEditColor('#10b981', this)"></button>
+                      <button type="button" class="color-swatch-btn" style="background: #f59e0b;" onclick="selectEditColor('#f59e0b', this)"></button>
+                      <button type="button" class="color-swatch-btn" style="background: #8b5cf6;" onclick="selectEditColor('#8b5cf6', this)"></button>
+                      <button type="button" class="color-swatch-btn" style="background: #ef4444;" onclick="selectEditColor('#ef4444', this)"></button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label">Bio Description</label>
+                <textarea id="editBio" class="form-input" rows="3" style="resize: vertical; font-family: inherit; font-size: 13px;"></textarea>
+              </div>
+
+              <button type="submit" class="btn-action-pill btn-primary-pill" style="width: 100%; justify-content: center; margin-top: 10px;">
+                <i class="fa-solid fa-floppy-disk"></i> Save Profile Changes
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notice -->
+    <div class="toast-notice" id="toastNotice">
+      <i class="fa-solid fa-circle-check"></i>
+      <span id="toastNoticeMsg">Action successful!</span>
+    </div>
+
+    <script id="currentUserData" type="application/json">{{ (current_user | tojson) if current_user else 'null' }}</script>
+
+    <!-- Application Script -->
+    <script>
+      let currentVote = "{{vote or ''}}";
+      const defaultOptionA = "{{option_a}}";
+      const defaultOptionB = "{{option_b}}";
+      let currentUser = JSON.parse(document.getElementById('currentUserData')?.textContent || 'null');
+
+      // Form state for Avatar selection
+      let regSelectedAvatar = '👨🏼‍🚀';
+      let regSelectedBg = '#3b82f6';
+      let editSelectedAvatar = '👨🏼‍🚀';
+      let editSelectedBg = '#3b82f6';
+
+      const pollData = [
+        {
+          id: 'cats-dogs',
+          title: "Do you like this " + defaultOptionA + "?",
+          greeting: "Hi Faza!",
+          creator: "Momon",
+          time: "5 Minutes ago",
+          image: "{{ url_for('static', filename='images/cat.jpg') }}",
+          optA: defaultOptionA,
+          optB: defaultOptionB
+        },
+        {
+          id: 'vintage-car',
+          title: "Do you like this Classic Beetle Car?",
+          greeting: "Hi Guys!",
+          creator: "Aarjav",
+          time: "15 Minutes ago",
+          image: "{{ url_for('static', filename='images/car.jpg') }}",
+          optA: "Love it!",
+          optB: "Not for me"
+        },
+        {
+          id: 'coffee-tea',
+          title: "Morning Fuel: Coffee or Tea?",
+          greeting: "Good Morning!",
+          creator: "Nola",
+          time: "1 Hour ago",
+          image: "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=800&q=80",
+          optA: "Coffee ☕",
+          optB: "Tea 🍵"
+        }
+      ];
+      let activePollIdx = 0;
+
+      function initDynamicLinks() {
+        const shareInp = document.getElementById('shareLinkInput');
+        if (shareInp) {
+          shareInp.value = window.location.href;
+        }
+        document.querySelectorAll('.comment-avatar[data-bg]').forEach(el => {
+          const bg = el.getAttribute('data-bg');
+          if (bg) el.style.backgroundColor = bg;
+        });
+        updateHeaderUserUI();
+      }
+      document.addEventListener('DOMContentLoaded', initDynamicLinks);
+
+      // ================= AUTHENTICATION & PROFILE LOGIC =================
+
+      function updateHeaderUserUI() {
+        const badge = document.getElementById('headerProfileBadge');
+        const avatarEl = document.getElementById('headerUserAvatar');
+        const nameEl = document.getElementById('headerUserName');
+        if (!badge || !avatarEl || !nameEl) return;
+
+        if (currentUser) {
+          avatarEl.innerText = currentUser.avatar || '👨🏼‍🚀';
+          avatarEl.style.backgroundColor = currentUser.bg || '#3b82f6';
+          nameEl.innerText = currentUser.display_name || currentUser.username;
+          badge.title = "View Profile & Account Settings";
+        } else {
+          avatarEl.innerText = '👤';
+          avatarEl.style.backgroundColor = '#64748b';
+          nameEl.innerText = 'Sign In';
+          badge.title = "Sign In or Create Account";
+        }
+      }
+
+      function handleProfileBadgeClick() {
+        if (currentUser) {
+          openProfileModal();
+        } else {
+          openAuthModal('login');
+        }
+      }
+
+      function openAuthModal(mode) {
+        switchAuthTab(mode || 'login');
+        document.getElementById('authAlertBox').className = 'auth-alert';
+        document.getElementById('authModal').classList.add('active');
+      }
+
+      function closeAuthModal() {
+        document.getElementById('authModal').classList.remove('active');
+      }
+
+      function switchAuthTab(tab) {
+        const tabLogin = document.getElementById('tabBtnLogin');
+        const tabReg = document.getElementById('tabBtnRegister');
+        const formLogin = document.getElementById('loginForm');
+        const formReg = document.getElementById('registerForm');
+        const title = document.getElementById('authModalTitle');
+        const subtitle = document.getElementById('authModalSubtitle');
+
+        if (tab === 'login') {
+          tabLogin.classList.add('active');
+          tabReg.classList.remove('active');
+          formLogin.style.display = 'block';
+          formReg.style.display = 'none';
+          title.innerText = "Welcome Back";
+          subtitle.innerText = "Sign in to vote, post comments & track stats";
+        } else {
+          tabReg.classList.add('active');
+          tabLogin.classList.remove('active');
+          formLogin.style.display = 'none';
+          formReg.style.display = 'block';
+          title.innerText = "Create Your Account";
+          subtitle.innerText = "Join the Votex community with a custom avatar";
+        }
+        document.getElementById('authAlertBox').className = 'auth-alert';
+      }
+
+      function showAuthAlert(msg, type) {
+        const box = document.getElementById('authAlertBox');
+        const txt = document.getElementById('authAlertMsg');
+        txt.innerText = msg;
+        box.className = 'auth-alert ' + (type === 'success' ? 'success' : 'error');
+      }
+
+      function selectRegAvatar(emoji, btn) {
+        regSelectedAvatar = emoji;
+        const prev = document.getElementById('regAvatarPreview');
+        if (prev) prev.innerText = emoji;
+        document.querySelectorAll('#registerForm .avatar-opt-btn').forEach(b => b.classList.remove('selected'));
+        if (btn) btn.classList.add('selected');
+      }
+
+      function selectRegColor(color, btn) {
+        regSelectedBg = color;
+        const prev = document.getElementById('regAvatarPreview');
+        if (prev) prev.style.backgroundColor = color;
+        document.querySelectorAll('#registerForm .color-swatch-btn').forEach(b => b.classList.remove('selected'));
+        if (btn) btn.classList.add('selected');
+      }
+
+      async function handleLogin(e) {
+        if (e) e.preventDefault();
+        const username = document.getElementById('loginUsername').value.trim();
+        const password = document.getElementById('loginPassword').value.trim();
+        const btn = document.getElementById('btnLoginSubmit');
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing In...';
+
+        try {
+          const res = await fetch('/api/auth/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+          });
+          const data = await res.json();
+          if (res.ok && data.status === 'ok') {
+            currentUser = data.user;
+            updateHeaderUserUI();
+            closeAuthModal();
+            showToast("Welcome back, " + currentUser.display_name + "!");
+          } else {
+            showAuthAlert(data.message || "Invalid credentials", 'error');
+          }
+        } catch (err) {
+          showAuthAlert("Network connection error. Please try again.", 'error');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Sign In to Account';
+        }
+      }
+
+      function loginAsDemo(username, password) {
+        document.getElementById('loginUsername').value = username;
+        document.getElementById('loginPassword').value = password;
+        handleLogin(null);
+      }
+
+      async function handleRegister(e) {
+        if (e) e.preventDefault();
+        const displayName = document.getElementById('regDisplayName').value.trim();
+        const username = document.getElementById('regUsername').value.trim();
+        const email = document.getElementById('regEmail').value.trim();
+        const password = document.getElementById('regPassword').value.trim();
+        const bio = document.getElementById('regBio').value.trim();
+        const btn = document.getElementById('btnRegSubmit');
+
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Creating Account...';
+
+        try {
+          const res = await fetch('/api/auth/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              display_name: displayName,
+              username: username,
+              email: email,
+              password: password,
+              avatar: regSelectedAvatar,
+              bg: regSelectedBg,
+              bio: bio
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.status === 'ok') {
+            currentUser = data.user;
+            updateHeaderUserUI();
+            closeAuthModal();
+            showToast("Account created! Welcome, " + currentUser.display_name + "!");
+          } else {
+            showAuthAlert(data.message || "Could not create account", 'error');
+          }
+        } catch (err) {
+          showAuthAlert("Network connection error. Please try again.", 'error');
+        } finally {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-user-check"></i> Create Account & Sign In';
+        }
+      }
+
+      async function handleLogout() {
+        try {
+          await fetch('/api/auth/logout', { method: 'POST' });
+          currentUser = null;
+          updateHeaderUserUI();
+          closeProfileModal();
+          showToast("Logged out successfully.");
+        } catch (err) {
+          console.error("Logout error", err);
+        }
+      }
+
+      // ================= PROFILE MODAL CONTROLLER =================
+
+      function openProfileModal() {
+        if (!currentUser) {
+          openAuthModal('login');
+          return;
+        }
+        populateProfileModal();
+        switchProfileTab('activity');
+        document.getElementById('profileModal').classList.add('active');
+        loadUserActivity();
+      }
+
+      function closeProfileModal() {
+        document.getElementById('profileModal').classList.remove('active');
+      }
+
+      function populateProfileModal() {
+        if (!currentUser) return;
+        document.getElementById('profDisplayName').innerText = currentUser.display_name || currentUser.username;
+        document.getElementById('profUsername').innerText = currentUser.username || '';
+        document.getElementById('profRoleTag').innerText = currentUser.role || 'Community Voter';
+        document.getElementById('profLevelBadge').innerText = currentUser.level || 'Level 1';
+        document.getElementById('profBioText').innerText = currentUser.bio || 'Active poll voter on Votex.';
+        document.getElementById('profJoinedDate').innerText = currentUser.created_at || 'Recently';
+
+        const avatarBig = document.getElementById('profAvatarBig');
+        avatarBig.innerText = currentUser.avatar || '👨🏼‍🚀';
+        avatarBig.style.backgroundColor = currentUser.bg || '#3b82f6';
+
+        // KPIs
+        document.getElementById('profKpiVotes').innerText = currentUser.votes_count || 0;
+        document.getElementById('profKpiPolls').innerText = currentUser.polls_count || 0;
+        document.getElementById('profKpiComments').innerText = currentUser.comments_count || 0;
+        document.getElementById('profKpiBookmarks').innerText = (currentUser.bookmarks || []).length;
+
+        // Edit Form Populate
+        document.getElementById('editDisplayName').value = currentUser.display_name || '';
+        document.getElementById('editRole').value = currentUser.role || '';
+        document.getElementById('editBio').value = currentUser.bio || '';
+        editSelectedAvatar = currentUser.avatar || '👨🏼‍🚀';
+        editSelectedBg = currentUser.bg || '#3b82f6';
+        const editPrev = document.getElementById('editAvatarPreview');
+        if (editPrev) {
+          editPrev.innerText = editSelectedAvatar;
+          editPrev.style.backgroundColor = editSelectedBg;
+        }
+      }
+
+      function switchProfileTab(tab) {
+        const tabs = ['activity', 'polls', 'bookmarks', 'edit'];
+        tabs.forEach(t => {
+          const btn = document.getElementById('profTabBtn' + t.charAt(0).toUpperCase() + t.slice(1));
+          const pane = document.getElementById('profPane' + t.charAt(0).toUpperCase() + t.slice(1));
+          if (btn) btn.classList.toggle('active', t === tab);
+          if (pane) pane.classList.toggle('active', t === tab);
+        });
+
+        if (tab === 'activity') loadUserActivity();
+        if (tab === 'polls') renderMyPolls();
+        if (tab === 'bookmarks') renderBookmarks();
+      }
+
+      function selectEditAvatar(emoji, btn) {
+        editSelectedAvatar = emoji;
+        const prev = document.getElementById('editAvatarPreview');
+        if (prev) prev.innerText = emoji;
+        document.querySelectorAll('#profileEditForm .avatar-opt-btn').forEach(b => b.classList.remove('selected'));
+        if (btn) btn.classList.add('selected');
+      }
+
+      function selectEditColor(color, btn) {
+        editSelectedBg = color;
+        const prev = document.getElementById('editAvatarPreview');
+        if (prev) prev.style.backgroundColor = color;
+        document.querySelectorAll('#profileEditForm .color-swatch-btn').forEach(b => b.classList.remove('selected'));
+        if (btn) btn.classList.add('selected');
+      }
+
+      async function saveProfileChanges(e) {
+        e.preventDefault();
+        const displayName = document.getElementById('editDisplayName').value.trim();
+        const role = document.getElementById('editRole').value.trim();
+        const bio = document.getElementById('editBio').value.trim();
+
+        try {
+          const res = await fetch('/api/auth/profile', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              display_name: displayName,
+              role: role,
+              bio: bio,
+              avatar: editSelectedAvatar,
+              bg: editSelectedBg
+            })
+          });
+          const data = await res.json();
+          if (res.ok && data.status === 'ok') {
+            currentUser = data.user;
+            updateHeaderUserUI();
+            populateProfileModal();
+            switchProfileTab('activity');
+            showToast("Profile settings updated!");
+          } else {
+            showToast(data.message || "Failed to update profile");
+          }
+        } catch (err) {
+          showToast("Network error updating profile");
+        }
+      }
+
+      async function loadUserActivity() {
+        const container = document.getElementById('profileActivityList');
+        if (!container) return;
+        try {
+          const res = await fetch('/api/user/activity');
+          const data = await res.json();
+          const list = data.activities || [];
+          if (list.length === 0) {
+            container.innerHTML = `
+              <div class="empty-state-box">
+                <div class="empty-state-icon"><i class="fa-regular fa-clock"></i></div>
+                <div class="empty-state-text">No recent activity yet. Cast your vote or comment!</div>
+              </div>
+            `;
+            return;
+          }
+          container.innerHTML = list.map(item => `
+            <div class="activity-item">
+              <div class="activity-icon-box"><i class="fa-solid ${item.icon || 'fa-bolt'}"></i></div>
+              <div class="activity-info">
+                <div class="activity-text">${item.title}</div>
+                <div class="activity-time">${item.time}</div>
+              </div>
+            </div>
+          `).join('');
+        } catch (err) {
+          container.innerHTML = '<div class="empty-state-text" style="color:#ef4444;">Could not load activity</div>';
+        }
+      }
+
+      function renderMyPolls() {
+        const container = document.getElementById('profileMyPollsList');
+        if (!container) return;
+        const myPolls = pollData.filter(p => p.creator === 'You' || (currentUser && p.creator.toLowerCase() === currentUser.username.toLowerCase()) || p.creator === 'Momon');
+        
+        if (myPolls.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state-box">
+              <div class="empty-state-icon"><i class="fa-solid fa-square-poll-vertical"></i></div>
+              <div class="empty-state-text">You haven't created any polls yet.</div>
+              <button class="btn-action-pill btn-primary-pill" onclick="closeProfileModal(); openCreateModal();" style="margin-top: 12px;">
+                <i class="fa-solid fa-plus"></i> Create First Poll
+              </button>
+            </div>
+          `;
+          return;
+        }
+
+        container.innerHTML = myPolls.map((p, idx) => `
+          <div class="item-mini-card">
+            <div class="item-mini-left">
+              <span class="item-mini-icon">📊</span>
+              <div>
+                <div class="item-mini-title">${p.title}</div>
+                <div class="item-mini-subtitle">${p.optA} vs ${p.optB} &bull; Active</div>
+              </div>
+            </div>
+            <button class="btn-mini-action" onclick="closeProfileModal(); selectPollByIdx(${idx});">
+              View Poll
+            </button>
+          </div>
+        `).join('');
+      }
+
+      function renderBookmarks() {
+        const container = document.getElementById('profileBookmarksList');
+        if (!container) return;
+        const bms = (currentUser && currentUser.bookmarks) || [];
+
+        if (bms.length === 0) {
+          container.innerHTML = `
+            <div class="empty-state-box">
+              <div class="empty-state-icon"><i class="fa-regular fa-bookmark"></i></div>
+              <div class="empty-state-text">No bookmarked polls. Click 'Save' on any poll card!</div>
+            </div>
+          `;
+          return;
+        }
+
+        const bookmarkedPolls = pollData.filter(p => bms.includes(p.id));
+        container.innerHTML = bookmarkedPolls.map(p => `
+          <div class="item-mini-card">
+            <div class="item-mini-left">
+              <span class="item-mini-icon">🔖</span>
+              <div>
+                <div class="item-mini-title">${p.title}</div>
+                <div class="item-mini-subtitle">By ${p.creator}</div>
+              </div>
+            </div>
+            <button class="btn-mini-action" onclick="closeProfileModal(); selectPollById('${p.id}');">
+              Open
+            </button>
+          </div>
+        `).join('');
+      }
+
+      // ================= CORE INTERACTION LOGIC =================
+
+      function selectPollById(id) {
+        const idx = pollData.findIndex(p => p.id === id);
+        if (idx !== -1) selectPollByIdx(idx);
+      }
+
+      function selectPollByIdx(idx) {
+        if (idx < 0 || idx >= pollData.length) return;
+        activePollIdx = idx;
+        const p = pollData[idx];
+
+        document.getElementById('heroImage').src = p.image;
+        document.getElementById('heroGreeting').innerText = p.greeting;
+        document.getElementById('heroQuestion').innerText = p.title;
+        document.getElementById('heroCreator').innerText = p.creator;
+        document.getElementById('heroTime').innerText = p.time;
+        document.getElementById('txt-option-a').innerText = "Yes! (" + p.optA + ")";
+        document.getElementById('txt-option-b').innerText = "No! (" + p.optB + ")";
+        document.getElementById('labelOptionA').innerText = p.optA;
+        document.getElementById('labelOptionB').innerText = p.optB;
+
+        for (let i = 0; i < 3; i++) {
+          const dot = document.getElementById('dot-' + i);
+          const gridCard = document.getElementById('grid-poll-' + i);
+          if (dot) dot.classList.toggle('active', i === idx);
+          if (gridCard) gridCard.classList.toggle('selected-poll', i === idx);
+        }
+
+        resetVoteButtons();
+      }
+
+      function toggleHeroImage() {
+        const nextIdx = (activePollIdx + 1) % pollData.length;
+        selectPollByIdx(nextIdx);
+      }
+
+      function resetVoteButtons() {
+        const btnA = document.getElementById('btn-option-a');
+        const btnB = document.getElementById('btn-option-b');
+        btnA.classList.remove('active-selected', 'dimmed');
+        btnB.classList.remove('active-selected', 'dimmed');
+      }
+
+      async function castVote(val) {
+        currentVote = val;
+        const btnA = document.getElementById('btn-option-a');
+        const btnB = document.getElementById('btn-option-b');
+        const p = pollData[activePollIdx];
+
+        btnA.classList.remove('active-selected', 'dimmed');
+        btnB.classList.remove('active-selected', 'dimmed');
+
+        if (val === 'a') {
+          btnA.classList.add('active-selected');
+          btnA.innerHTML = '<span>' + p.optA + ' <i class="fa-solid fa-circle-check"></i></span>';
+          btnB.classList.add('dimmed');
+          btnB.innerHTML = '<span>' + p.optB + '</span>';
+        } else {
+          btnB.classList.add('active-selected');
+          btnB.innerHTML = '<span>' + p.optB + ' <i class="fa-solid fa-circle-check"></i></span>';
+          btnA.classList.add('dimmed');
+          btnA.innerHTML = '<span>' + p.optA + '</span>';
+        }
+
+        // Trigger celebratory confetti effect
+        if (window.confetti) {
+          confetti({
+            particleCount: 50,
+            spread: 60,
+            origin: { y: 0.7 }
+          });
+        }
+
+        if (currentUser) {
+          currentUser.votes_count = (currentUser.votes_count || 0) + 1;
+        }
+
+        showToast("Vote for " + (val === 'a' ? p.optA : p.optB) + " processed!");
+
+        // Send vote to server
+        try {
+          await fetch('/', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'XMLHttpRequest'
+            },
+            body: JSON.stringify({ vote: val })
+          });
+        } catch (e) {
+          console.warn("AJAX submission fallback", e);
+          document.getElementById('voteInput').value = val;
+          document.getElementById('voteForm').submit();
+        }
+      }
+
+      async function postComment() {
+        const inp = document.getElementById('newCommentInput');
+        const txt = inp.value.trim();
+        if (!txt) return;
+
+        try {
+          const res = await fetch('/api/comments', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: txt,
+              author: currentUser ? currentUser.display_name : 'Community Member',
+              poll_id: pollData[activePollIdx].id
+            })
+          });
+          const data = await res.json();
+          if (data.status === 'ok') {
+            inp.value = '';
+            if (currentUser) {
+              currentUser.comments_count = (currentUser.comments_count || 0) + 1;
+            }
+            const countBadge = document.getElementById('commentCountBadge');
+            if (countBadge) {
+              countBadge.innerText = (parseInt(countBadge.innerText || '0') + 1).toString();
+            }
+            const list = document.getElementById('commentsContainer');
+            const item = document.createElement('div');
+            item.className = 'comment-item';
+            item.innerHTML = `
+              <div class="comment-avatar" data-bg="${data.comment.bg}" style="background-color: ${data.comment.bg};">${data.comment.avatar}</div>
+              <div class="comment-body">
+                <div class="comment-author-row">
+                  <span>${data.comment.author}</span>
+                  <span class="comment-time">${data.comment.time}</span>
+                </div>
+                <div class="comment-msg">${data.comment.text}</div>
+              </div>
+            `;
+            list.prepend(item);
+            showToast("Comment posted!");
+          }
+        } catch (e) {
+          console.error("Comment error", e);
+        }
+      }
+
+      function openCreateModal() {
+        document.getElementById('createPollModal').classList.add('active');
+      }
+
+      function closeCreateModal() {
+        document.getElementById('createPollModal').classList.remove('active');
+      }
+
+      function handleCreatePoll(e) {
+        e.preventDefault();
+        const title = document.getElementById('newPollTitle').value;
+        const optA = document.getElementById('newPollOptA').value;
+        const optB = document.getElementById('newPollOptB').value;
+        const creatorName = currentUser ? currentUser.display_name : 'You';
+
+        const newPoll = {
+          id: 'custom-' + Date.now(),
+          title: title,
+          greeting: "New Community Poll!",
+          creator: creatorName,
+          time: "Just now",
+          image: "{{ url_for('static', filename='images/car.jpg') }}",
+          optA: optA,
+          optB: optB
+        };
+        pollData.push(newPoll);
+        if (currentUser) {
+          currentUser.polls_count = (currentUser.polls_count || 0) + 1;
+        }
+        closeCreateModal();
+        selectPollByIdx(pollData.length - 1);
+        showToast("New poll published by " + creatorName + "!");
+      }
+
+      function openShareModal() {
+        initDynamicLinks();
+        document.getElementById('shareModal').classList.add('active');
+      }
+
+      function closeShareModal() {
+        document.getElementById('shareModal').classList.remove('active');
+      }
+
+      function copyShareLink() {
+        const input = document.getElementById('shareLinkInput');
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(input.value);
+        } else {
+          input.select();
+          document.execCommand('copy');
+        }
+        closeShareModal();
+        showToast("Share link copied to clipboard!");
+      }
+
+      async function toggleBookmark(btn) {
+        const currentPollId = pollData[activePollIdx].id;
+        const icon = btn.querySelector('i');
+        
+        if (!currentUser) {
+          openAuthModal('login');
+          return;
+        }
+
+        try {
+          const res = await fetch('/api/user/bookmarks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ poll_id: currentPollId })
+          });
+          const data = await res.json();
+          if (data.status === 'ok') {
+            currentUser.bookmarks = data.bookmarks;
+            if (data.is_bookmarked) {
+              icon.classList.remove('fa-regular');
+              icon.classList.add('fa-solid');
+              icon.style.color = '#f59e0b';
+              showToast("Poll saved to bookmarks!");
+            } else {
+              icon.classList.remove('fa-solid');
+              icon.classList.add('fa-regular');
+              icon.style.color = 'inherit';
+              showToast("Poll removed from bookmarks");
+            }
+          }
+        } catch (e) {
+          console.error("Bookmark toggle error", e);
+        }
+      }
+
+      function showToast(msg) {
+        const toast = document.getElementById('toastNotice');
+        document.getElementById('toastNoticeMsg').innerText = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2500);
+      }
+
+      function switchNav(btn, tab) {
+        document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+        btn.classList.add('active');
+        if (tab === 'leaderboard' || tab === 'activity') {
+          openProfileModal();
+          switchProfileTab(tab === 'activity' ? 'activity' : 'polls');
+        } else {
+          showToast("Switched to " + tab + " view");
+        }
+      }
+
+      function filterPolls() {
+        const query = document.getElementById('pollSearchInput').value.toLowerCase();
+        const cards = document.querySelectorAll('.poll-card-item');
+        cards.forEach(c => {
+          const text = c.innerText.toLowerCase();
+          c.style.display = text.includes(query) ? 'flex' : 'none';
+        });
+      }
+    </script>
+  </body>
+</html>
+

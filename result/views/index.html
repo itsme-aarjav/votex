@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en" ng-app="catsvsdogs">
+  <head>
+    <meta charset="utf-8">
+    <title>Live Analytics & Insights - Votex</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="/stylesheets/style.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  </head>
+  <body ng-controller="statsCtrl">
+    <div class="app-layout">
+      <!-- Left Sidebar Navigation -->
+      <aside class="sidebar">
+        <a href="http://localhost:5002" class="brand-logo">
+          <div class="logo-icon">
+            <i class="fa-solid fa-chart-pie"></i>
+          </div>
+          <div>
+            <div class="brand-text">Votex <span class="brand-badge">ANALYTICS</span></div>
+          </div>
+        </a>
+
+        <ul class="nav-menu">
+          <li class="nav-heading">Intelligence</li>
+          <li>
+            <a href="http://localhost:5002" class="nav-link">
+              <i class="fa-solid fa-vote-yea"></i>
+              <span>Cast Vote</span>
+            </a>
+          </li>
+          <li>
+            <button class="nav-link active">
+              <i class="fa-solid fa-chart-line"></i>
+              <span>Live Statistics</span>
+              <span class="link-badge">LIVE</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-link" onclick="exportData()">
+              <i class="fa-solid fa-file-arrow-down"></i>
+              <span>Export CSV</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-link" onclick="triggerShare()">
+              <i class="fa-solid fa-share-nodes"></i>
+              <span>Share Dashboard</span>
+            </button>
+          </li>
+
+          <li class="nav-heading">Platform Health</li>
+          <li>
+            <a href="javascript:void(0)" class="nav-link" onclick="refreshScores()">
+              <i class="fa-solid fa-arrows-rotate"></i>
+              <span>Sync WebSockets</span>
+            </a>
+          </li>
+        </ul>
+      </aside>
+
+      <!-- Main Application Wrapper -->
+      <div class="main-wrapper">
+        <!-- Top Navigation Bar -->
+        <header class="top-header">
+          <div class="header-search">
+            <i class="fa-solid fa-magnifying-glass" style="color: #64748b; font-size: 13px;"></i>
+            <input type="text" placeholder="Search analytics, voter records, metrics..." />
+          </div>
+
+          <div class="header-actions">
+            <a href="http://localhost:5002" target="_blank" class="btn-action-pill btn-primary-pill">
+              <i class="fa-solid fa-vote-yea"></i>
+              <span>Vote Screen</span>
+            </a>
+            <button class="btn-action-pill btn-secondary-pill" onclick="exportData()">
+              <i class="fa-solid fa-download"></i>
+              <span>Export</span>
+            </button>
+
+            <div class="user-profile-badge">
+              <div class="user-profile-avatar">👩🏻‍💻</div>
+              <span class="user-profile-name">Analytics Admin</span>
+            </div>
+          </div>
+        </header>
+
+        <!-- Main Dashboard Body -->
+        <main class="dashboard-body">
+          <!-- Left Column -->
+          <div class="content-left">
+            <!-- 4 KPI Metric Cards -->
+            <div class="kpi-metrics-grid">
+              <div class="kpi-card kpi-highlight-blue">
+                <div class="kpi-header">
+                  <span>Total Votes</span>
+                  <i class="fa-solid fa-check-to-slot kpi-icon"></i>
+                </div>
+                <div class="kpi-value">{{total}}</div>
+                <div class="kpi-trend" style="color: #fff;"><i class="fa-solid fa-arrow-trend-up"></i> Real-time DB</div>
+              </div>
+
+              <div class="kpi-card">
+                <div class="kpi-header">
+                  <span>Impressions</span>
+                  <i class="fa-solid fa-eye kpi-icon"></i>
+                </div>
+                <div class="kpi-value">{{viewsCount}}</div>
+                <div class="kpi-trend"><i class="fa-solid fa-arrow-trend-up"></i> +14% today</div>
+              </div>
+
+              <div class="kpi-card">
+                <div class="kpi-header">
+                  <span>Engagement Rate</span>
+                  <i class="fa-solid fa-bolt kpi-icon"></i>
+                </div>
+                <div class="kpi-value">88.4%</div>
+                <div class="kpi-trend"><i class="fa-solid fa-arrow-trend-up"></i> High Pulse</div>
+              </div>
+
+              <div class="kpi-card">
+                <div class="kpi-header">
+                  <span>Total Shares</span>
+                  <i class="fa-solid fa-share-nodes kpi-icon"></i>
+                </div>
+                <div class="kpi-value">{{shareCount}}</div>
+                <div class="kpi-trend"><i class="fa-solid fa-arrow-trend-up"></i> +3 this hour</div>
+              </div>
+            </div>
+
+            <!-- Breakdown Card -->
+            <div class="breakdown-card">
+              <div class="breakdown-header">
+                <div class="breakdown-title-wrap">
+                  <div class="breakdown-thumb" ng-click="toggleSubject()">
+                    <img ng-src="{{currentSubject.image}}" alt="Poll Subject Preview" />
+                  </div>
+                  <div>
+                    <div class="breakdown-title">{{currentSubject.title}}</div>
+                    <div class="breakdown-subtitle">Live community engagement & vote distribution</div>
+                  </div>
+                </div>
+
+                <button class="poll-toggle-badge" ng-click="toggleSubject()">
+                  <i class="fa-solid fa-repeat"></i> Switch Subject
+                </button>
+              </div>
+
+              <!-- Real-time Animated Progress Bars -->
+              <div class="impressions-container">
+                <div style="font-size: 13px; font-weight: 700; color: #94a3b8;">Vote Breakdown & Distribution</div>
+
+                <!-- Option A: Green / Cats / Yes -->
+                <div class="impression-bar-track">
+                  <div class="impression-bar-fill fill-option-a" ng-style="{ width: aPercent + '%' }"></div>
+                  <div class="impression-content content-a">
+                    <span>{{currentSubject.optionA}}</span>
+                    <span class="vote-count-pill">{{a}} Votes ({{aPercent}}%)</span>
+                  </div>
+                </div>
+
+                <!-- Option B: Blue / Dogs / No -->
+                <div class="impression-bar-track">
+                  <div class="impression-bar-fill fill-option-b" ng-style="{ width: bPercent + '%' }"></div>
+                  <div class="impression-content content-b">
+                    <span>{{currentSubject.optionB}}</span>
+                    <span class="vote-count-pill">{{b}} Votes ({{bPercent}}%)</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Seen By & Demographic Section -->
+              <div class="seen-by-box">
+                <div class="seen-by-label">
+                  <i class="fa-solid fa-users" style="color: #4ade80; margin-right: 6px;"></i> Active Community Audience
+                </div>
+                <div class="avatar-stack-row">
+                  <div class="seen-avatar av-1" title="Nola Sofyan">👩🏻‍🦰</div>
+                  <div class="seen-avatar av-2" title="Zhofran">👨🏼‍🦱</div>
+                  <div class="seen-avatar av-3" title="Faza">🧑🏻</div>
+                  <div class="seen-avatar av-4" title="Alex M.">🧔🏻‍♂️</div>
+                  <div class="seen-avatar av-5" title="Sarah K.">🧕🏻</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Live Stream & Activity -->
+          <div class="content-right">
+            <div class="activity-card">
+              <div class="feed-header">
+                <div class="feed-title">Live Activity Stream</div>
+                <div class="live-badge">
+                  <div class="live-pulse-dot"></div>
+                  <span>SOCKET.IO</span>
+                </div>
+              </div>
+
+              <div class="vote-stream">
+                <div class="stream-item" ng-repeat="item in recentVotes track by $index">
+                  <div class="stream-user">
+                    <div class="stream-avatar" ng-style="{'background-color': item.bg}">{{item.avatar}}</div>
+                    <div>
+                      <div class="stream-name">{{item.name}}</div>
+                      <div class="stream-time">Just now</div>
+                    </div>
+                  </div>
+                  <div class="stream-badge" ng-class="{'badge-yes': item.type === 'a', 'badge-no': item.type === 'b'}">
+                    {{item.choice}}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <!-- Toast Notice -->
+    <div class="toast-notice" id="toastNotice">
+      <i class="fa-solid fa-circle-check"></i>
+      <span id="toastNoticeMsg">Action successful!</span>
+    </div>
+
+    <!-- Scripts -->
+    <script src="socket.io.js"></script>
+    <script src="angular.min.js"></script>
+    <script src="app.js"></script>
+    <script>
+      function showToast(msg) {
+        const toast = document.getElementById('toastNotice');
+        document.getElementById('toastNoticeMsg').innerText = msg;
+        toast.classList.add('show');
+        setTimeout(() => toast.classList.remove('show'), 2500);
+      }
+
+      function exportData() {
+        showToast("Exporting poll data to CSV...");
+        const csvContent = "data:text/csv;charset=utf-8,Option,Votes,Percentage\nCats/Option A,12,60%\nDogs/Option B,8,40%";
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "votex_analytics.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      function triggerShare() {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(window.location.href);
+          showToast("Dashboard URL copied to clipboard!");
+        }
+      }
+
+      function refreshScores() {
+        showToast("Synchronizing with WebSocket server...");
+      }
+    </script>
+  </body>
+</html>
