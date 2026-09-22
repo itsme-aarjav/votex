@@ -140,7 +140,7 @@ pipeline {
                         --set vote.image.tag=${IMAGE_VERSION} \
                         --set result.image.tag=${IMAGE_VERSION} \
                         --set worker.image.tag=${IMAGE_VERSION} \
-                        --wait --timeout 5m0s || true
+                        --wait --timeout 5m0s
 
                     kubectl get pods,pvc,hpa,ingress -n votex
                 '''
