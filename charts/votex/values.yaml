@@ -19,10 +19,10 @@ vote:
     nodePort: 31002
   resources:
     limits:
-      cpu: 500m
+      cpu: 200m
       memory: 256Mi
     requests:
-      cpu: 100m
+      cpu: 50m
       memory: 128Mi
   probes:
     liveness:
@@ -57,14 +57,14 @@ result:
   service:
     type: NodePort
     port: 5001
-    targetPort: 80
+    targetPort: 8080
     nodePort: 31001
   resources:
     limits:
-      cpu: 500m
+      cpu: 200m
       memory: 256Mi
     requests:
-      cpu: 100m
+      cpu: 50m
       memory: 128Mi
   probes:
     liveness:
@@ -94,10 +94,10 @@ worker:
     pullPolicy: IfNotPresent
   resources:
     limits:
-      cpu: 300m
+      cpu: 200m
       memory: 256Mi
     requests:
-      cpu: 100m
+      cpu: 50m
       memory: 128Mi
 
 # ==================== REDIS IN-MEMORY QUEUE ====================

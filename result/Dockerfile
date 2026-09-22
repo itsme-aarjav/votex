@@ -20,8 +20,8 @@ COPY . .
 
 RUN chown -R node:node /usr/local/app /node_modules
 
-ENV PORT 80
-EXPOSE 80
+ENV PORT 8080
+EXPOSE 8080
 
 USER node
 
