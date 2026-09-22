@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: db
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: db
+spec:
+  type: {{ .Values.db.service.type }}
+  ports:
+  - name: "db-service"
+    port: {{ .Values.db.service.port }}
+    targetPort: {{ .Values.db.service.port }}
+  selector:
+    app: db

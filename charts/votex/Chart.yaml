@@ -1,0 +1,14 @@
+apiVersion: v2
+name: votex
+description: Helm chart for Votex - Distributed Real-Time Community Polling Platform
+type: application
+version: 2.0.0
+appVersion: "2.0.0"
+keywords:
+  - polling
+  - voting
+  - microservices
+  - kubernetes
+maintainers:
+  - name: Aarjav Jain
+    email: aarjav24122002@gmail.com

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: result
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: result
+spec:
+  type: {{ .Values.result.service.type }}
+  ports:
+  - name: "result-service"
+    port: {{ .Values.result.service.port }}
+    targetPort: {{ .Values.result.service.targetPort }}
+    {{- if and (eq .Values.result.service.type "NodePort") .Values.result.service.nodePort }}
+    nodePort: {{ .Values.result.service.nodePort }}
+    {{- end }}
+  selector:
+    app: result

@@ -1,0 +1,18 @@
+{{- if .Values.db.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "votex.fullname" . }}-db-pvc
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: db
+spec:
+  accessModes:
+    - {{ .Values.db.persistence.accessMode | quote }}
+  {{- if .Values.db.persistence.storageClass }}
+  storageClassName: {{ .Values.db.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.db.persistence.size | quote }}
+{{- end }}

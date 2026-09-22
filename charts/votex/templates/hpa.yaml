@@ -1,0 +1,59 @@
+{{- if .Values.vote.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vote-hpa
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: vote
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vote
+  minReplicas: {{ .Values.vote.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.vote.autoscaling.maxReplicas }}
+  metrics:
+  {{- if .Values.vote.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.vote.autoscaling.targetCPUUtilizationPercentage }}
+  {{- end }}
+  {{- if .Values.vote.autoscaling.targetMemoryUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.vote.autoscaling.targetMemoryUtilizationPercentage }}
+  {{- end }}
+---
+{{- end }}
+{{- if .Values.result.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: result-hpa
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: result
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: result
+  minReplicas: {{ .Values.result.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.result.autoscaling.maxReplicas }}
+  metrics:
+  {{- if .Values.result.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ .Values.result.autoscaling.targetCPUUtilizationPercentage }}
+  {{- end }}
+{{- end }}

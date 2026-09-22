@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: redis
+spec:
+  type: {{ .Values.redis.service.type }}
+  ports:
+  - name: "redis-service"
+    port: {{ .Values.redis.service.port }}
+    targetPort: {{ .Values.redis.service.port }}
+  selector:
+    app: redis

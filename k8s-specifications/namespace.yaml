@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: votex
+  labels:
+    app.kubernetes.io/name: votex
+    app.kubernetes.io/part-of: votex-platform

@@ -1,0 +1,44 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: result
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: result
+spec:
+  {{- if not .Values.result.autoscaling.enabled }}
+  replicas: {{ .Values.result.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: result
+  template:
+    metadata:
+      labels:
+        app: result
+    spec:
+      containers:
+      - name: result
+        image: "{{ .Values.result.image.repository }}:{{ .Values.result.image.tag }}"
+        imagePullPolicy: {{ .Values.result.image.pullPolicy }}
+        ports:
+        - containerPort: {{ .Values.result.service.targetPort }}
+          name: result
+        resources:
+          {{- toYaml .Values.result.resources | nindent 10 }}
+        livenessProbe:
+          httpGet:
+            path: {{ .Values.result.probes.liveness.path }}
+            port: {{ .Values.result.service.targetPort }}
+          initialDelaySeconds: {{ .Values.result.probes.liveness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.result.probes.liveness.periodSeconds }}
+          timeoutSeconds: {{ .Values.result.probes.liveness.timeoutSeconds }}
+          failureThreshold: {{ .Values.result.probes.liveness.failureThreshold }}
+        readinessProbe:
+          httpGet:
+            path: {{ .Values.result.probes.readiness.path }}
+            port: {{ .Values.result.service.targetPort }}
+          initialDelaySeconds: {{ .Values.result.probes.readiness.initialDelaySeconds }}
+          periodSeconds: {{ .Values.result.probes.readiness.periodSeconds }}
+          timeoutSeconds: {{ .Values.result.probes.readiness.timeoutSeconds }}
+          failureThreshold: {{ .Values.result.probes.readiness.failureThreshold }}
