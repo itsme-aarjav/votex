@@ -23,8 +23,13 @@ CMD ["python", "app.py"]
 # Define the final stage that will bundle the application for production
 FROM base AS final
 
+# Create non-root user
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser:appuser /usr/local/app
+
 # Copy our code from the current folder to the working directory inside the container
 COPY . .
+
+USER appuser
 
 # Make port 80 available for links and/or publish
 EXPOSE 80

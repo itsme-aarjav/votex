@@ -18,8 +18,12 @@ RUN npm ci && \
 
 COPY . .
 
+RUN chown -R node:node /usr/local/app /node_modules
+
 ENV PORT 80
 EXPOSE 80
+
+USER node
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["node", "server.js"]

@@ -10,6 +10,7 @@ pipeline {
         DOCKER_USER       = 'aarjavjainn'
         DOCKER_CRED_ID    = 'dockerhub-credentials'
         SONAR_HOST_URL    = 'http://sonarqube:9000'
+        SONAR_CRED_ID     = 'sonar-token'
         KUBECONFIG_ID     = 'k8s-kubeconfig'
         
         // Proper Image Versioning: Semantic version based on Jenkins Build Number & Git Commit
@@ -71,14 +72,18 @@ pipeline {
         stage('3. SonarQube Code Quality Analysis') {
             steps {
                 echo "===> Performing Static Application Security Testing (SAST)..."
-                sh '''
-                    sonar-scanner \
-                        -Dsonar.host.url=${SONAR_HOST_URL} \
-                        -Dsonar.projectKey=votex-platform \
-                        -Dsonar.projectName="Votex - Distributed Polling Platform" \
-                        -Dsonar.projectVersion=${IMAGE_VERSION} \
-                        -Dsonar.sources=vote,result,worker || true
-                '''
+                withCredentials([string(credentialsId: "${SONAR_CRED_ID}", variable: 'SONAR_TOKEN')]) {
+                    sh '''
+                        sonar-scanner \
+                            -Dsonar.host.url=${SONAR_HOST_URL} \
+                            -Dsonar.token=${SONAR_TOKEN} \
+                            -Dsonar.login=${SONAR_TOKEN} \
+                            -Dsonar.projectKey=votex-platform \
+                            -Dsonar.projectName="Votex - Distributed Polling Platform" \
+                            -Dsonar.projectVersion=${IMAGE_VERSION} \
+                            -Dsonar.sources=vote,result,worker || true
+                    '''
+                }
             }
         }
 

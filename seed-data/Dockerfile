@@ -13,4 +13,7 @@ COPY . .
 # create POST data files with ab friendly formats
 RUN python make-data.py
 
+RUN adduser --disabled-password --gecos "" seeduser && chown -R seeduser:seeduser /seed
+USER seeduser
+
 CMD /seed/generate-votes.sh

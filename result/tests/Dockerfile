@@ -9,4 +9,6 @@ RUN apt-get update -qq && apt-get install -qy \
 RUN yarn global add phantomjs-prebuilt
 ADD . /app
 WORKDIR /app
+RUN chown -R node:node /app
+USER node
 CMD ["/app/tests.sh"]
