@@ -57,7 +57,7 @@ result:
   service:
     type: NodePort
     port: 5001
-    targetPort: 80
+    targetPort: 8080
     nodePort: 31001
   resources:
     limits:
