@@ -27,7 +27,7 @@ variable "public_subnet_ids" {
 variable "node_instance_types" {
   description = "EC2 instance types for the worker nodes"
   type        = list(string)
-  default     = ["t3.medium"]
+  default     = ["c7i-flex.large"]
 }
 
 variable "node_desired_size" {
