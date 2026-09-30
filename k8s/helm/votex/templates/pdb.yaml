@@ -1,0 +1,25 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "votex.fullname" . }}-vote-pdb
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: vote
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vote
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "votex.fullname" . }}-result-pdb
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: result
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: result

@@ -1,0 +1,25 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: vote-pdb
+  namespace: votex
+  labels:
+    app: vote
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: vote
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: result-pdb
+  namespace: votex
+  labels:
+    app: result
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: result

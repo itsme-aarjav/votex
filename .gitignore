@@ -1,7 +1,33 @@
 *.pyc
+*.pyo
+__pycache__/
 project.lock.json
 bin/
 obj/
 .vs/
+.vscode/
+.idea/
 node_modules/
 .DS_Store
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Secrets & Local Env
+.env
+.env.*
+*.pem
+*.key
+kubeconfig*
