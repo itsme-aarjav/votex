@@ -21,6 +21,18 @@ if command -v helm &> /dev/null; then
     --namespace votex \
     --create-namespace \
     --wait --timeout 5m0s || true
+
+  echo "==> Deploying Prometheus & Grafana Monitoring stack..."
+  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
+  helm repo update prometheus-community 2>/dev/null || true
+  helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
+    --namespace monitoring \
+    --create-namespace \
+    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
+    --set alertmanager.enabled=false \
+    --wait --timeout 5m0s || true
+
+  kubectl apply -f "$ROOT_DIR/k8s/monitoring/prometheus-alerts.yaml" 2>/dev/null || true
 else
   echo "==> Helm not found, applying manifests directly..."
   kubectl apply -f "$ROOT_DIR/k8s/manifests/namespace.yaml"
@@ -29,6 +41,9 @@ fi
 
 echo "==> Current cluster resources in votex namespace:"
 kubectl get pods,svc,pvc,pdb -n votex
+
+echo "==> Monitoring stack in monitoring namespace:"
+kubectl get pods,svc -n monitoring 2>/dev/null || true
 
 echo "==> Service endpoints:"
 kubectl get svc -n votex | grep -E "vote|result|NAME" || true

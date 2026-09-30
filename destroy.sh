@@ -1,12 +1,41 @@
 #!/usr/bin/env bash
+# Robust teardown script for AWS EKS and Kubernetes resources
 set -e
 
-echo "==> Cleaning up Kubernetes services and load balancers..."
-helm uninstall votex -n votex 2>/dev/null || kubectl delete -f k8s/manifests/ -n votex 2>/dev/null || true
+REGION="${AWS_REGION:-eu-north-1}"
+CLUSTER="${CLUSTER_NAME:-votex-cluster}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "==> Waiting 30s for AWS load balancers to detach..."
-sleep 30
+echo "==> [1/6] Stopping any local port-forward processes..."
+pkill -f "kubectl port-forward" 2>/dev/null || true
 
-echo "==> Destroying Terraform infrastructure..."
-cd terraform
+echo "==> [2/6] Deleting application workloads and services..."
+if command -v helm &> /dev/null; then
+  helm uninstall votex -n votex 2>/dev/null || true
+  helm uninstall prometheus -n monitoring 2>/dev/null || true
+fi
+kubectl delete -f "$ROOT_DIR/k8s/manifests/" -n votex 2>/dev/null || true
+
+echo "==> [3/6] Deleting PVCs to release AWS EBS storage volumes..."
+kubectl delete pvc --all -n votex --timeout=45s 2>/dev/null || true
+
+echo "==> [4/6] Deleting namespaces..."
+kubectl delete namespace votex --timeout=30s 2>/dev/null || true
+kubectl delete namespace monitoring --timeout=30s 2>/dev/null || true
+
+echo "==> [5/6] Waiting for AWS Load Balancers and ENIs to detach..."
+# Allow 25 seconds for AWS ELBs to completely deregister from public subnets
+sleep 25
+
+echo "==> [6/6] Destroying AWS Terraform infrastructure..."
+cd "$ROOT_DIR/terraform"
 terraform destroy -auto-approve
+
+echo "==> Cleaning up local kubeconfig context..."
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")"
+if [ -n "$ACCOUNT_ID" ]; then
+  kubectl config delete-context "arn:aws:eks:${REGION}:${ACCOUNT_ID}:cluster/${CLUSTER}" 2>/dev/null || true
+  kubectl config unset "clusters.arn:aws:eks:${REGION}:${ACCOUNT_ID}:cluster/${CLUSTER}" 2>/dev/null || true
+fi
+
+echo "==> Teardown complete. All AWS resources and cloud charges stopped."
