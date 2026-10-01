@@ -61,8 +61,8 @@ Every code push to GitHub triggers an automated 8-stage declarative Jenkins pipe
 6. **Trivy Container Scan**: Scans built container images for `HIGH` and `CRITICAL` vulnerabilities.
 7. **Docker Push**: Pushes tagged versioned images to Docker Hub registry.
 8. **Automated Kubernetes Rollout**: Performs zero-downtime deployment via Helm with automatic rollback on probe failure.
-
-> **Demonstration Video**: [Trivy Container Vulnerability Scan in Terminal (MP4)](docs/videos/trivy-security-scanning.mp4)
+#### Vulnerability Scanning Demonstration
+![Trivy Security Scanning](docs/images/trivy-security-scanning.gif)
 
 ### Code Quality & Security (SonarQube)
 
@@ -90,8 +90,9 @@ All infrastructure is provisioned through modular Terraform in `eu-north-1` (Sto
 
 - **AWS EBS CSI Driver & gp3 StorageClass**: Dynamically provisions persistent AWS EBS gp3 volumes for PostgreSQL database data.
 - **Cost-Optimized NAT Gateway**: Single NAT Gateway deployed in public subnet 1 to provide outbound internet access for container pulls while keeping cloud costs minimal.
+### AWS EKS Cluster Workloads & Deployment Status
 
-> **Demonstration Video**: [AWS EKS Workload Console & Deployment Verification (MP4)](docs/videos/aws-eks-cluster-workloads.mp4)
+![AWS EKS Cluster Workloads](docs/images/aws-eks-cluster-workloads.gif)
 
 ---
 
@@ -118,17 +119,18 @@ Workloads are deployed using Helm charts with production-grade reliability confi
 
 The monitoring stack collects infrastructure and container performance metrics:
 
-| Grafana Cluster Resource Dashboard | Prometheus Targets & Scraping |
-| :---: | :---: |
-| ![Grafana Workloads](docs/images/grafana-workloads-dashboard.png) | ![Prometheus Targets](docs/images/prometheus-targets-health.png) |
+### Cluster Workload Monitoring (Grafana)
+
+![Grafana Workload Monitoring](docs/images/grafana-workload-monitoring.gif)
 
 - **Prometheus**: Scrapes metrics from kubelet, cAdvisor, node-exporters, and application endpoints.
 - **Grafana**: Visualizes real-time CPU, memory, network utilization, and cluster workload quotas.
 
-> **Demonstration Videos**:
-> - [Grafana Cluster Workload Monitoring Walkthrough (MP4)](docs/videos/grafana-workload-monitoring.mp4)
-> - [Prometheus Target Scraping & Health (MP4)](docs/videos/prometheus-target-health.mp4)
-> - [Prometheus Alerting Rules Evaluation (MP4)](docs/videos/prometheus-alerting-rules.mp4)
+### Prometheus Health & Alerting Engine
+
+| Prometheus Alerting Rules | Prometheus Active Target Health |
+| :---: | :---: |
+| ![Prometheus Alerting Rules](docs/images/prometheus-alerting-rules.gif) | ![Prometheus Target Health](docs/images/prometheus-target-health.gif) |
 
 ---
 
@@ -158,7 +160,7 @@ k8s-kind-voting-app/
 ├── seed-data/                # Vote generator for testing
 ├── tests/                    # Unit, load (k6), and resilience tests
 ├── docs/                     # Documentation and media assets
-│   ├── images/               # Web-optimized high-resolution screenshots
+│   ├── images/               # High-resolution screenshots and animated walkthroughs
 │   ├── videos/               # Compressed MP4 demonstration walkthroughs
 │   └── github-webhook-setup.md
 ├── deploy.sh                 # One-click automated deployment script
