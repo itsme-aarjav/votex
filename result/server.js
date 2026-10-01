@@ -1,6 +1,7 @@
 var express = require('express'),
     async = require('async'),
     { Pool } = require('pg'),
+    path = require('path'),
     cookieParser = require('cookie-parser'),
     app = express(),
     server = require('http').Server(app),
