@@ -8,6 +8,35 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 echo "==> Configuring kubectl for $CLUSTER ($REGION)..."
 aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER"
 
+echo "==> Authorizing AWS Console and IAM users in EKS aws-auth..."
+ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")"
+if [ -n "$ACCOUNT_ID" ]; then
+  cat <<EOF | kubectl apply -f - 2>/dev/null || true
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aws-auth
+  namespace: kube-system
+data:
+  mapRoles: |
+    - rolearn: arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER}-node-group-role
+      groups:
+      - system:bootstrappers
+      - system:nodes
+      username: system:node:{{EC2PrivateDNSName}}
+  mapUsers: |
+    - userarn: arn:aws:iam::${ACCOUNT_ID}:root
+      username: root
+      groups:
+        - system:masters
+    - userarn: arn:aws:iam::${ACCOUNT_ID}:user/terra-admin
+      username: terra-admin
+      groups:
+        - system:masters
+EOF
+fi
+
+
 echo "==> Waiting for worker nodes to register with EKS..."
 for i in {1..30}; do
   NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo 0)
@@ -74,4 +103,3 @@ echo " Observability Access (Port-Forward):"
 echo " Grafana:    kubectl port-forward svc/prometheus-grafana -n monitoring 3000:80"
 echo " Prometheus: kubectl port-forward svc/prometheus-kube-prometheus-prometheus -n monitoring 9090:9090"
 echo "================================================================="
-
