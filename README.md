@@ -43,7 +43,7 @@ All infrastructure is provisioned through modular Terraform in `eu-north-1`:
   - **2 Public Subnets** (`10.0.1.0/24`, `10.0.2.0/24`): Host the NAT Gateway and internet-facing AWS Load Balancers.
   - **2 Private Subnets** (`10.0.11.0/24`, `10.0.12.0/24`): Host EKS worker nodes and database storage with no public IP exposure.
 - **Cost-Optimized NAT Gateway**: Single NAT Gateway deployed in public subnet 1 to provide outbound internet access for container pulls while keeping cloud costs minimal.
-- **Amazon EKS Managed Node Group**: 2x `t3.medium` instances with 20 GB gp3 encrypted root volumes, auto-scaling from 1 to 3 nodes.
+- **Amazon EKS Managed Node Group**: 2x `c7i-flex.large` instances with 20 GB gp3 encrypted root volumes, auto-scaling from 1 to 3 nodes.
 - **AWS EBS CSI Driver & gp3 StorageClass**: Dynamically provisions persistent AWS EBS gp3 volumes for PostgreSQL database data.
 - **Instance Auto-Initialization**: EC2 worker nodes automatically update system packages and configure AWS Systems Manager (SSM) on boot via launch template user data.
 
