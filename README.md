@@ -168,8 +168,7 @@ k8s-kind-voting-app/
 ├── tests/                    # Unit, load (k6), and resilience tests
 ├── docs/                     # Documentation and media assets
 │   ├── images/               # High-resolution production screenshots
-│   ├── videos/               # Compressed MP4 demonstration walkthroughs
-│   └── github-webhook-setup.md
+│   └── videos/               # Compressed MP4 demonstration walkthroughs
 ├── deploy.sh                 # One-click automated deployment script
 ├── destroy.sh                # One-click automated teardown script
 ├── dashboard.sh              # Service endpoints display script
