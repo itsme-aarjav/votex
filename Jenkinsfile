@@ -2,14 +2,15 @@ pipeline {
     agent any
 
     triggers {
-        // Triggered automatically on code push via GitHub Webhook
+        // Triggered automatically on code push via GitHub Webhook & SCM Polling
         githubPush()
+        pollSCM('* * * * *')
     }
 
     environment {
         DOCKER_USER       = 'aarjavjainn'
         DOCKER_CRED_ID    = 'dockerhub-credentials'
-        SONAR_HOST_URL    = 'http://sonarqube:9000'
+        SONAR_HOST_URL    = 'http://sonarqube.sonarqube.svc.cluster.local:9000'
         KUBECONFIG_ID     = 'k8s-kubeconfig'
         
         // Proper Image Versioning: Semantic version based on Jenkins Build Number & Git Commit
@@ -74,10 +75,13 @@ pipeline {
                 sh '''
                     echo "Analyzing source code quality with SonarQube for ${IMAGE_VERSION}..."
                     sonar-scanner \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
                         -Dsonar.projectKey=votex-platform \
                         -Dsonar.projectName="Votex - Distributed Polling Platform" \
                         -Dsonar.projectVersion=${IMAGE_VERSION} \
-                        -Dsonar.sources=vote,result,worker 2>/dev/null || echo "SonarQube code scan completed successfully"
+                        -Dsonar.sources=vote,result,worker \
+                        -Dsonar.tests=tests \
+                        -Dsonar.exclusions="result/tests/**,**/node_modules/**,**/bin/**,**/obj/**" 2>/dev/null || echo "SonarQube code scan completed successfully"
                 '''
             }
         }

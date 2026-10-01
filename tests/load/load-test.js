@@ -1,10 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 
-// -------------------------------------------------------------
-// Votex High-Concurrency Load & Stress Test Suite (k6)
-// Designed to stress the Vote service and trigger Kubernetes HPA
-// -------------------------------------------------------------
+// Votex load test suite (k6) to validate concurrency and HPA autoscaling
 
 export const options = {
   stages: [

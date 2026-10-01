@@ -88,7 +88,7 @@ metadata:
   labels:
     app: jenkins
 spec:
-  type: ClusterIP
+  type: LoadBalancer
   ports:
   - port: 8080
     targetPort: 8080

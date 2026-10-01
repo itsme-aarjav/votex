@@ -724,7 +724,7 @@
       }
       document.addEventListener('DOMContentLoaded', initDynamicLinks);
 
-      // ================= AUTHENTICATION & PROFILE LOGIC =================
+      // Authentication and profile state
 
       function updateHeaderUserUI() {
         const badge = document.getElementById('headerProfileBadge');
@@ -904,7 +904,7 @@
         }
       }
 
-      // ================= PROFILE MODAL CONTROLLER =================
+      // Profile modal
 
       function openProfileModal() {
         if (!currentUser) {
@@ -1112,7 +1112,7 @@
         `).join('');
       }
 
-      // ================= CORE INTERACTION LOGIC =================
+      // Interaction logic
 
       function selectPollById(id) {
         const idx = pollData.findIndex(p => p.id === id);

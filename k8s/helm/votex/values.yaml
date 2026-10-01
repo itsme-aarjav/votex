@@ -1,11 +1,9 @@
-# Default values for Votex Helm Chart.
-# This is a YAML-formatted file.
-
+# Default values for Votex Helm chart.
 global:
   environment: production
   imagePullPolicy: IfNotPresent
 
-# ==================== VOTE SERVICE (PYTHON / FLASK) ====================
+# Vote service (Python / Flask)
 vote:
   replicaCount: 2
   image:
@@ -47,7 +45,7 @@ vote:
     optionA: "Cats"
     optionB: "Dogs"
 
-# ==================== RESULT SERVICE (NODE.JS) ====================
+# Result service (Node.js)
 result:
   replicaCount: 2
   image:
@@ -85,7 +83,7 @@ result:
     maxReplicas: 8
     targetCPUUtilizationPercentage: 75
 
-# ==================== WORKER DAEMON (.NET CORE) ====================
+# Worker daemon (.NET)
 worker:
   replicaCount: 1
   image:
@@ -100,7 +98,7 @@ worker:
       cpu: 100m
       memory: 128Mi
 
-# ==================== REDIS IN-MEMORY QUEUE ====================
+# Redis queue
 redis:
   image:
     repository: redis
@@ -124,7 +122,7 @@ redis:
       initialDelaySeconds: 5
       periodSeconds: 5
 
-# ==================== POSTGRESQL DATABASE ====================
+# PostgreSQL database
 db:
   image:
     repository: postgres
@@ -144,7 +142,6 @@ db:
     enabled: true
     size: 1Gi
     accessMode: ReadWriteOnce
-    # storageClass: "standard" # Leave unset to use default cluster storage class
   credentials:
     username: postgres
     password: postgres
@@ -157,7 +154,6 @@ db:
       initialDelaySeconds: 10
       periodSeconds: 5
 
-# ==================== INGRESS CONTROLLER ====================
 ingress:
   enabled: true
   className: nginx

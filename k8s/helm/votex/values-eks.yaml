@@ -1,14 +1,9 @@
-# ==============================================================================
-# AWS EKS Specific Helm Values for Votex
-# Use this values file when deploying to Amazon EKS:
-#   helm upgrade --install votex ./k8s/helm/votex -f ./k8s/helm/votex/values-eks.yaml -n votex --create-namespace
-# ==============================================================================
-
+# AWS EKS Helm values for Votex
 global:
   environment: production
   imagePullPolicy: IfNotPresent
 
-# ==================== VOTE SERVICE (PYTHON / FLASK) ====================
+# Vote service (Python / Flask)
 vote:
   replicaCount: 2
   image:
@@ -16,7 +11,6 @@ vote:
     tag: latest
     pullPolicy: IfNotPresent
   service:
-    # On AWS EKS, LoadBalancer automatically creates an AWS Elastic Load Balancer (ELB)
     type: LoadBalancer
     port: 80
     targetPort: 80
@@ -51,7 +45,7 @@ vote:
     optionA: "Cats"
     optionB: "Dogs"
 
-# ==================== RESULT SERVICE (NODE.JS) ====================
+# Result service (Node.js)
 result:
   replicaCount: 2
   image:
@@ -89,7 +83,7 @@ result:
     maxReplicas: 6
     targetCPUUtilizationPercentage: 75
 
-# ==================== WORKER DAEMON (.NET CORE) ====================
+# Worker daemon (.NET)
 worker:
   replicaCount: 1
   image:
@@ -104,7 +98,7 @@ worker:
       cpu: 100m
       memory: 128Mi
 
-# ==================== REDIS IN-MEMORY QUEUE ====================
+# Redis queue
 redis:
   image:
     repository: redis
@@ -128,7 +122,7 @@ redis:
       initialDelaySeconds: 5
       periodSeconds: 5
 
-# ==================== POSTGRESQL DATABASE ====================
+# PostgreSQL database
 db:
   image:
     repository: postgres
@@ -148,7 +142,6 @@ db:
     enabled: true
     size: 1Gi
     accessMode: ReadWriteOnce
-    # High performance, cost-optimized AWS EBS gp3 storage class
     storageClass: "gp3"
   credentials:
     username: postgres
@@ -162,7 +155,5 @@ db:
       initialDelaySeconds: 10
       periodSeconds: 5
 
-# ==================== INGRESS CONTROLLER ====================
-# Disabled by default in favor of direct AWS LoadBalancers for Vote & Result
 ingress:
   enabled: false
