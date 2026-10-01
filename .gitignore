@@ -31,3 +31,7 @@ terraform.rc
 *.pem
 *.key
 kubeconfig*
+
+# Media Recordings & Raw Dump (Preserved locally, not committed to git)
+*.mov
+screen-recordings-and ss/
