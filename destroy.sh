@@ -24,6 +24,7 @@ echo "==> [4/6] Deleting namespaces..."
 kubectl delete namespace votex --timeout=30s 2>/dev/null || true
 kubectl delete namespace monitoring --timeout=30s 2>/dev/null || true
 kubectl delete namespace jenkins --timeout=30s 2>/dev/null || true
+kubectl delete namespace sonarqube --timeout=30s 2>/dev/null || true
 
 echo "==> [5/6] Waiting for AWS Load Balancers to be completely removed..."
 for i in {1..30}; do
