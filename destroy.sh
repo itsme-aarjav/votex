@@ -23,9 +23,20 @@ echo "==> [4/6] Deleting namespaces..."
 kubectl delete namespace votex --timeout=30s 2>/dev/null || true
 kubectl delete namespace monitoring --timeout=30s 2>/dev/null || true
 
-echo "==> [5/6] Waiting for AWS Load Balancers and ENIs to detach..."
-# Allow 25 seconds for AWS ELBs to completely deregister from public subnets
-sleep 25
+echo "==> [5/6] Waiting for AWS Load Balancers to be completely removed..."
+for i in {1..30}; do
+  ACTIVE_ELBS=$(aws elb describe-load-balancers --region "$REGION" --query "LoadBalancerDescriptions[].LoadBalancerName" --output text 2>/dev/null || echo "")
+  if [ -z "$ACTIVE_ELBS" ]; then
+    echo "==> All AWS Load Balancers have been completely removed."
+    break
+  fi
+  echo "==> Waiting for active ELB(s) to finish AWS cleanup: $ACTIVE_ELBS ($i/30)..."
+  sleep 5
+done
+
+# Buffer to allow AWS to release and detach ENIs from subnets
+sleep 10
+
 
 echo "==> [6/6] Destroying AWS Terraform infrastructure..."
 cd "$ROOT_DIR/terraform"

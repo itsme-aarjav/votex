@@ -29,6 +29,7 @@ resource "null_resource" "cluster_auto_setup" {
 
   triggers = {
     cluster_endpoint = module.eks.cluster_endpoint
+    always_run       = timestamp()
   }
 
   provisioner "local-exec" {
