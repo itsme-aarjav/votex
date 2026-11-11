@@ -35,3 +35,16 @@ kubeconfig*
 # Media Recordings & Raw Dump (Preserved locally, not committed to git)
 *.mov
 screen-recordings-and ss/
+
+# Pipeline & Test Reports
+reports/
+.pytest_cache/
+.coverage
+.coverage.*
+.venv/
+*.zip
+
+# Local-only test suites (preserved locally on workstation, untracked in Git)
+tests/
+votex/tests/
+votex/result/tests/

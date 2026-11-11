@@ -30,3 +30,14 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
+
+{{/*
+Database secret name
+*/}}
+{{- define "votex.dbSecretName" -}}
+{{- if .Values.db.existingSecret -}}
+{{- .Values.db.existingSecret -}}
+{{- else -}}
+{{- printf "%s-db-secret" (include "votex.fullname" .) -}}
+{{- end -}}
+{{- end }}

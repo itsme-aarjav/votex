@@ -25,5 +25,21 @@ spec:
       - name: worker
         image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
         imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
+        env:
+        - name: REDIS_HOST
+          value: "redis"
+        - name: REDIS_PORT
+          value: {{ .Values.redis.service.port | quote }}
+        - name: POSTGRES_HOST
+          value: "db"
+        {{- if .Values.otel.enabled }}
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ .Values.otel.endpoint | quote }}
+        - name: OTEL_SERVICE_NAME
+          value: "votex-worker"
+        {{- end }}
+        envFrom:
+        - secretRef:
+            name: {{ include "votex.dbSecretName" . }}
         resources:
           {{- toYaml .Values.worker.resources | nindent 10 }}

@@ -41,6 +41,19 @@ spec:
           value: {{ .Values.vote.env.optionA | quote }}
         - name: OPTION_B
           value: {{ .Values.vote.env.optionB | quote }}
+        - name: POSTGRES_HOST
+          value: "db"
+        - name: REDIS_HOST
+          value: "redis"
+        {{- if .Values.otel.enabled }}
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ .Values.otel.endpoint | quote }}
+        - name: OTEL_SERVICE_NAME
+          value: "votex-vote"
+        {{- end }}
+        envFrom:
+        - secretRef:
+            name: {{ include "votex.dbSecretName" . }}
         resources:
           {{- toYaml .Values.vote.resources | nindent 10 }}
         livenessProbe:

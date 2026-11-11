@@ -1,0 +1,438 @@
+pipeline {
+    agent {
+        kubernetes {
+            defaultContainer 'jnlp'
+            yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app.kubernetes.io/name: votex-jenkins-agent
+spec:
+  volumes:
+    - name: docker-sock
+      emptyDir: {}
+  containers:
+    - name: jnlp
+      image: jenkins/inbound-agent:3283.v92c105e0f819-1
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    - name: dind
+      image: docker:27-dind
+      securityContext:
+        privileged: true
+      command: ["dockerd-entrypoint.sh"]
+      args: ["--host=unix:///var/run/docker.sock"]
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+      resources:
+        requests:
+          cpu: 200m
+          memory: 384Mi
+        limits:
+          cpu: 1000m
+          memory: 1536Mi
+    - name: python
+      image: python:3.11-slim
+      command: ["sleep"]
+      args: ["99d"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    - name: node
+      image: node:24-slim
+      command: ["sleep"]
+      args: ["99d"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    - name: sonar
+      image: sonarsource/sonar-scanner-cli:latest
+      command: ["sleep"]
+      args: ["99d"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 1000m
+          memory: 1024Mi
+    - name: trivy
+      image: aquasec/trivy:0.58.2
+      command: ["sleep"]
+      args: ["99d"]
+      env:
+        - name: DOCKER_HOST
+          value: unix:///var/run/docker.sock
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    - name: docker
+      image: docker:27-cli
+      command: ["sleep"]
+      args: ["99d"]
+      env:
+        - name: DOCKER_HOST
+          value: unix:///var/run/docker.sock
+      volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 1000m
+          memory: 1024Mi
+    - name: redis
+      image: redis:alpine
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 250m
+          memory: 256Mi
+    - name: postgres
+      image: postgres:15-alpine
+      env:
+        - name: POSTGRES_USER
+          value: postgres
+        - name: POSTGRES_PASSWORD
+          value: postgres
+        - name: POSTGRES_DB
+          value: postgres
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+    - name: deploy
+      image: alpine/k8s:1.31.1
+      command: ["sleep"]
+      args: ["99d"]
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+'''
+        }
+    }
+
+    triggers {
+        // Internal AWS LoadBalancer cannot receive external GitHub webhooks.
+        // Outbound periodic SCM polling avoids fragile webhook-relay infrastructure.
+        pollSCM('H/5 * * * *')
+    }
+
+    environment {
+        DOCKER_USER       = 'aarjavjainn'
+        DOCKER_CRED_ID    = 'dockerhub-credentials'
+        SONAR_HOST_URL    = 'http://sonarqube.sonarqube.svc.cluster.local:9000'
+        KUBECONFIG_ID     = 'k8s-kubeconfig'
+
+        // Deterministic immutable versioning: Semantic version + Build Number + Git SHA
+        IMAGE_TAG         = "v2.1.${env.BUILD_NUMBER}-${env.GIT_COMMIT ? env.GIT_COMMIT.take(7) : 'rel'}"
+        VOTE_IMAGE        = "${DOCKER_USER}/votex-vote"
+        RESULT_IMAGE      = "${DOCKER_USER}/votex-result"
+        WORKER_IMAGE      = "${DOCKER_USER}/votex-worker"
+        SEED_IMAGE        = "${DOCKER_USER}/votex-seed"
+    }
+
+    options {
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        timeout(time: 45, unit: 'MINUTES')
+        timestamps()
+    }
+
+    stages {
+        stage('1. Checkout SCM') {
+            steps {
+                echo "Checking out source code repository..."
+                checkout scm
+                sh '''
+                    echo "Release Candidate Tag: ${IMAGE_TAG}"
+                    git log -1 --stat
+                    mkdir -p reports/zap reports/trivy reports/tests
+                '''
+            }
+        }
+
+        stage('2. Service Build & Smoke Validation') {
+            parallel {
+                stage('Validate: Vote Service (Python)') {
+                    steps {
+                        container('python') {
+                            echo "Validating Vote service syntax, dependencies, and startup..."
+                            sh '''
+                                python3 -m pip install --upgrade pip -r votex/vote/requirements.txt
+                                python3 -m py_compile votex/vote/app.py votex/vote/db.py
+                                python3 -c "import flask, psycopg2, redis, bcrypt; print('Vote dependencies verified')"
+
+                                PORT=5000 python3 votex/vote/app.py > /tmp/vote-smoke.log 2>&1 &
+                                VOTE_PID=$!
+                                sleep 3
+
+                                if curl -sf http://127.0.0.1:5000/api/config > /dev/null; then
+                                    echo "Vote service HTTP startup and config response verified successfully."
+                                else
+                                    echo "Vote startup smoke check failed:"
+                                    cat /tmp/vote-smoke.log
+                                    kill $VOTE_PID 2>/dev/null || true
+                                    exit 1
+                                fi
+                                kill $VOTE_PID 2>/dev/null || true
+                            '''
+                        }
+                    }
+                }
+                stage('Validate: Result Service (Node.js)') {
+                    steps {
+                        container('node') {
+                            echo "Validating Result service syntax, npm dependencies, and startup..."
+                            sh '''
+                                cd votex/result
+                                node -c server.js
+                                npm ci
+                                PORT=5001 node server.js > /tmp/result-smoke.log 2>&1 &
+                                RESULT_PID=$!
+                                sleep 3
+
+                                if curl -sf http://127.0.0.1:5001/api/config > /dev/null; then
+                                    echo "Result service HTTP startup and config response verified successfully."
+                                else
+                                    echo "Result startup smoke check failed:"
+                                    cat /tmp/result-smoke.log
+                                    kill $RESULT_PID 2>/dev/null || true
+                                    exit 1
+                                fi
+                                kill $RESULT_PID 2>/dev/null || true
+                            '''
+                        }
+                    }
+                }
+                stage('Validate: Worker Daemon (Python)') {
+                    steps {
+                        container('python') {
+                            echo "Validating Worker daemon syntax, configuration, and connectivity..."
+                            sh '''
+                                python3 -m pip install --upgrade pip -r votex/worker/requirements.txt
+                                python3 -m py_compile votex/worker/app.py
+                                python3 -c "import redis, psycopg2; print('Worker dependencies verified')"
+                                timeout 5 python3 votex/worker/app.py || [ $? -eq 124 ]
+                                echo "Worker daemon startup and event loop loop verified."
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('3. SonarQube Analysis & Quality Gate') {
+            steps {
+                container('sonar') {
+                    echo "Running SonarQube static code quality analysis..."
+                    withSonarQubeEnv('SonarQube') {
+                        sh """
+                            sonar-scanner \
+                                -Dproject.settings=sonarqube/sonar-project.properties \
+                                -Dsonar.host.url=${SONAR_HOST_URL} \
+                                -Dsonar.projectKey=votex-platform \
+                                -Dsonar.projectName="Votex - Distributed Polling Platform" \
+                                -Dsonar.projectVersion=${IMAGE_TAG} \
+                                -Dsonar.sources=votex/vote,votex/result,votex/worker \
+                                -Dsonar.exclusions="**/node_modules/**,**/bin/**,**/obj/**,votex/result/views/angular.min.js,votex/result/views/socket.io.js"
+                        """
+                    }
+                    echo "Enforcing strict SonarQube Quality Gate threshold..."
+                    timeout(time: 5, unit: 'MINUTES') {
+                        script {
+                            def qg = waitForQualityGate()
+                            if (qg.status != 'OK') {
+                                error "Pipeline aborted: SonarQube Quality Gate failed with status: ${qg.status}"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('4. Trivy Filesystem Scan') {
+            steps {
+                container('trivy') {
+                    echo "Enforcing zero-tolerance filesystem vulnerability policy..."
+                    sh '''
+                        trivy fs \
+                            --exit-code 1 \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --format table \
+                            --output reports/trivy/fs-scan.txt \
+                            .
+                    '''
+                }
+            }
+        }
+
+        stage('5. Docker Build') {
+            steps {
+                container('docker') {
+                    echo "Building container images for ${IMAGE_TAG}..."
+                    sh '''
+                        docker build --target final -t ${VOTE_IMAGE}:${IMAGE_TAG} -t ${VOTE_IMAGE}:latest ./votex/vote
+                        docker build -t ${RESULT_IMAGE}:${IMAGE_TAG} -t ${RESULT_IMAGE}:latest ./votex/result
+                        docker build -t ${WORKER_IMAGE}:${IMAGE_TAG} -t ${WORKER_IMAGE}:latest ./votex/worker
+                        docker build -t ${SEED_IMAGE}:${IMAGE_TAG} -t ${SEED_IMAGE}:latest ./votex/seed-data
+                    '''
+                }
+            }
+        }
+
+        stage('6. Trivy Image Scan') {
+            steps {
+                container('trivy') {
+                    echo "Scanning container images for vulnerabilities..."
+                    sh '''
+                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${VOTE_IMAGE}:${IMAGE_TAG}
+                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${RESULT_IMAGE}:${IMAGE_TAG}
+                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${WORKER_IMAGE}:${IMAGE_TAG}
+                    '''
+                }
+            }
+        }
+
+        stage('7. OWASP ZAP DAST') {
+            steps {
+                container('docker') {
+                    echo "Executing OWASP ZAP Dynamic Application Security Testing against candidate release..."
+                    sh '''
+                        chmod +x security/run-zap-scan.sh
+                        CANDIDATE_IMAGE="${VOTE_IMAGE}:${IMAGE_TAG}" ./security/run-zap-scan.sh
+                    '''
+                }
+            }
+        }
+
+        stage('8. Docker Hub Publish') {
+            steps {
+                container('docker') {
+                    echo "Publishing verified release candidate ${IMAGE_TAG} to container registry..."
+                    withCredentials([usernamePassword(credentialsId: "${DOCKER_CRED_ID}", usernameVariable: 'DOCKER_USER_VAR', passwordVariable: 'DOCKER_PWD_VAR')]) {
+                        sh '''
+                            echo "$DOCKER_PWD_VAR" | docker login -u "$DOCKER_USER_VAR" --password-stdin
+                            docker push ${VOTE_IMAGE}:${IMAGE_TAG}
+                            docker push ${VOTE_IMAGE}:latest
+                            docker push ${RESULT_IMAGE}:${IMAGE_TAG}
+                            docker push ${RESULT_IMAGE}:latest
+                            docker push ${WORKER_IMAGE}:${IMAGE_TAG}
+                            docker push ${WORKER_IMAGE}:latest
+                            docker push ${SEED_IMAGE}:${IMAGE_TAG}
+                            docker push ${SEED_IMAGE}:latest
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('9. EKS Deployment & Verification') {
+            steps {
+                container('deploy') {
+                    script {
+                        env.DEPLOYMENT_ATTEMPTED = "true"
+                    }
+                    echo "Deploying immutable release ${IMAGE_TAG} via Helm..."
+                    withCredentials([file(credentialsId: "${KUBECONFIG_ID}", variable: 'KUBECONFIG')]) {
+                        sh '''
+                            OTEL_ROLE_ARN="${OTEL_COLLECTOR_ROLE_ARN:-}"
+                            if [ -z "$OTEL_ROLE_ARN" ]; then
+                                OTEL_ROLE_ARN="$(kubectl get configmap votex-cluster-config -n votex -o jsonpath='{.data.OTEL_COLLECTOR_ROLE_ARN}' 2>/dev/null || echo '')"
+                            fi
+                            if [ -z "$OTEL_ROLE_ARN" ]; then
+                                echo "ERROR: OTEL_COLLECTOR_ROLE_ARN could not be retrieved from environment or ConfigMap votex/votex-cluster-config." >&2
+                                echo "Ensure terraform/scripts/post_apply.sh has completed successfully or provide OTEL_COLLECTOR_ROLE_ARN." >&2
+                                exit 1
+                            fi
+
+                            helm upgrade --install votex ./k8s/helm/votex \
+                                --namespace votex \
+                                --create-namespace \
+                                -f ./k8s/helm/votex/values-eks.yaml \
+                                --set vote.image.tag=${IMAGE_TAG} \
+                                --set result.image.tag=${IMAGE_TAG} \
+                                --set worker.image.tag=${IMAGE_TAG} \
+                                --set otel.collector.serviceAccount.roleArn="${OTEL_ROLE_ARN}" \
+                                --wait --timeout 5m0s
+
+                            echo "Verifying deployment rollouts..."
+                            kubectl rollout status deployment/vote -n votex --timeout=120s
+                            kubectl rollout status deployment/result -n votex --timeout=120s
+                            kubectl rollout status deployment/worker -n votex --timeout=120s
+
+                            echo "Verifying deployment CLI tools (Helm, kubectl, Ansible)..."
+                            if ! command -v ansible-playbook &> /dev/null; then
+                                echo "Installing Ansible into deployment container..."
+                                apk add --no-cache ansible-core
+                            fi
+
+                            echo "Executing Ansible post-deployment verification playbook..."
+                            ansible-playbook -i ansible/inventory/hosts.ini.example ansible/verify_deployment.yml \
+                                --extra-vars "k8s_namespace=votex vote_endpoint=http://vote.votex.svc.cluster.local result_endpoint=http://result.votex.svc.cluster.local"
+
+                            echo "Running smoke checks against live cluster endpoints..."
+                            kubectl get pods,pvc,hpa,svc -n votex -o wide
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
+            junit testResults: 'reports/tests/*.xml', allowEmptyResults: true
+            cleanWs notFailBuild: true
+        }
+        failure {
+            script {
+                if (env.DEPLOYMENT_ATTEMPTED == "true") {
+                    echo "Deployment phase failed. Executing targeted Helm rollback to previous stable revision..."
+                    container('deploy') {
+                        withCredentials([file(credentialsId: "${KUBECONFIG_ID}", variable: 'KUBECONFIG')]) {
+                            sh 'helm rollback votex -n votex || true'
+                        }
+                    }
+                } else {
+                    echo "Pipeline failed in pre-deployment validation gate. Production deployment was never initiated; rollback skipped."
+                }
+            }
+        }
+    }
+}

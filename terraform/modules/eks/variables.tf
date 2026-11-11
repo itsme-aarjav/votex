@@ -6,7 +6,7 @@ variable "cluster_name" {
 variable "cluster_version" {
   description = "Kubernetes version for the EKS cluster"
   type        = string
-  default     = "1.31"
+  default     = "1.36"
 }
 
 variable "vpc_id" {
@@ -27,7 +27,7 @@ variable "public_subnet_ids" {
 variable "node_instance_types" {
   description = "EC2 instance types for the worker nodes"
   type        = list(string)
-  default     = ["c7i-flex.large"]
+  default     = ["m7i-flex.large"]
 }
 
 variable "node_desired_size" {
@@ -39,17 +39,23 @@ variable "node_desired_size" {
 variable "node_min_size" {
   description = "Minimum number of worker nodes"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "node_max_size" {
   description = "Maximum number of worker nodes"
   type        = number
-  default     = 3
+  default     = 2
 }
 
 variable "environment" {
   description = "Deployment environment"
   type        = string
   default     = "dev"
+}
+
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "List of approved CIDR blocks permitted to communicate with the EKS public API endpoint"
+  type        = list(string)
+  default     = ["10.0.0.0/16"]
 }

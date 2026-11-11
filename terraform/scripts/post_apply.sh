@@ -1,166 +1,97 @@
 #!/usr/bin/env bash
-set -e
+set -eo pipefail
 
 REGION="${AWS_REGION:-eu-north-1}"
 CLUSTER="${CLUSTER_NAME:-votex-cluster}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+TERRAFORM_DIR="$ROOT_DIR/terraform"
 
 echo "Configuring kubectl for $CLUSTER ($REGION)..."
-aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER"
+if ! aws eks update-kubeconfig --region "$REGION" --name "$CLUSTER"; then
+  echo "ERROR: Failed to update kubeconfig for $CLUSTER in $REGION." >&2
+  exit 1
+fi
 
-echo "Authorizing IAM entities in aws-auth ConfigMap..."
-ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text 2>/dev/null || echo "")"
-if [ -n "$ACCOUNT_ID" ]; then
-  cat <<EOF | kubectl apply -f - 2>/dev/null || true
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: aws-auth
-  namespace: kube-system
-data:
-  mapRoles: |
-    - rolearn: arn:aws:iam::${ACCOUNT_ID}:role/${CLUSTER}-node-group-role
-      groups:
-      - system:bootstrappers
-      - system:nodes
-      username: system:node:{{EC2PrivateDNSName}}
-  mapUsers: |
-    - userarn: arn:aws:iam::${ACCOUNT_ID}:root
-      username: root
-      groups:
-        - system:masters
-    - userarn: arn:aws:iam::${ACCOUNT_ID}:user/terra-admin
-      username: terra-admin
-      groups:
-        - system:masters
-EOF
+echo "Verifying EKS cluster connectivity..."
+if ! kubectl cluster-info >/dev/null 2>&1; then
+  echo "ERROR: Unable to communicate with EKS cluster '$CLUSTER' in region '$REGION'." >&2
+  echo "Ensure AWS credentials have sufficient EKS access and the control plane is active." >&2
+  exit 1
 fi
 
 echo "Waiting for worker nodes to register with EKS..."
+FOUND_NODES=false
 for i in {1..30}; do
   NODE_COUNT=$(kubectl get nodes --no-headers 2>/dev/null | wc -l | tr -d ' ' || echo 0)
   if [ "$NODE_COUNT" -gt 0 ]; then
     echo "Found $NODE_COUNT worker node(s) registered."
+    FOUND_NODES=true
     break
   fi
   echo "Waiting for worker nodes to join cluster ($i/30)..."
   sleep 10
 done
 
+if [ "$FOUND_NODES" != "true" ]; then
+  echo "ERROR: Worker nodes failed to join the cluster within 300 seconds." >&2
+  exit 1
+fi
+
 echo "Waiting for worker nodes to become Ready..."
 kubectl wait --for=condition=Ready nodes --all --timeout=180s
 
-echo "Applying gp3 storage class..."
+echo "Verifying AWS EBS CSI Driver and IAM role handoff..."
+EBS_ROLE="$(terraform -chdir="$TERRAFORM_DIR" output -raw ebs_csi_role_arn 2>/dev/null || echo "")"
+if [ -n "$EBS_ROLE" ]; then
+  echo "Verified EBS CSI IRSA role: $EBS_ROLE"
+fi
+
+echo "Applying and verifying gp3 StorageClass..."
 kubectl apply -f "$ROOT_DIR/k8s/manifests/gp3-storageclass.yaml"
+kubectl get storageclass gp3
 
-if command -v helm &> /dev/null; then
-  echo "Deploying votex via Helm..."
-  helm upgrade --install votex "$ROOT_DIR/k8s/helm/votex" \
-    -f "$ROOT_DIR/k8s/helm/votex/values-eks.yaml" \
-    --namespace votex \
-    --create-namespace \
-    --wait --timeout 5m0s
+if [ -f "$ROOT_DIR/k8s/monitoring/metrics-server.yaml" ]; then
+  echo "Applying metrics-server for Kubernetes HPA..."
+  kubectl apply -f "$ROOT_DIR/k8s/monitoring/metrics-server.yaml"
+fi
 
-  echo "Deploying Prometheus and Grafana stack..."
-  helm repo add prometheus-community https://prometheus-community.github.io/helm-charts 2>/dev/null || true
-  helm repo update prometheus-community 2>/dev/null || true
-  helm upgrade --install prometheus prometheus-community/kube-prometheus-stack \
-    --namespace monitoring \
-    --create-namespace \
-    --set prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues=false \
-    --set alertmanager.enabled=false \
-    --wait --timeout 5m0s
+echo "Ensuring namespace 'votex' exists..."
+kubectl create namespace votex --dry-run=client -o yaml | kubectl apply -f -
 
-  kubectl apply -f "$ROOT_DIR/k8s/monitoring/prometheus-alerts.yaml" 2>/dev/null || true
-  kubectl apply -f "$ROOT_DIR/k8s/monitoring/metrics-server.yaml" 2>/dev/null || true
+echo "Checking database credentials secret in namespace 'votex'..."
+if kubectl get secret db-secret -n votex >/dev/null 2>&1; then
+  echo "Secret 'db-secret' already exists in namespace 'votex'; preserving existing database credentials."
 else
-  echo "Helm not found, applying manifests directly..."
-  kubectl apply -f "$ROOT_DIR/k8s/manifests/namespace.yaml"
-  kubectl apply -f "$ROOT_DIR/k8s/manifests/" -n votex
-fi
-
-echo "Deploying Jenkins..."
-kubectl apply -f "$ROOT_DIR/k8s/manifests/jenkins.yaml"
-
-echo "Deploying SonarQube..."
-kubectl apply -f "$ROOT_DIR/k8s/manifests/sonarqube.yaml"
-
-echo "Bootstrapping Jenkins CI/CD tooling..."
-kubectl rollout status deployment/jenkins -n jenkins --timeout=180s || true
-JENKINS_POD=$(kubectl get pods -n jenkins -l app=jenkins -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
-if [ -n "$JENKINS_POD" ]; then
-  kubectl exec -n jenkins "$JENKINS_POD" -- bash -c '
-    mkdir -p /var/jenkins_home/bin
-    if [ ! -f /var/jenkins_home/bin/kubectl ]; then
-      curl -sSL -o /var/jenkins_home/bin/kubectl https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl
-      chmod +x /var/jenkins_home/bin/kubectl
-    fi
-    if [ ! -f /var/jenkins_home/bin/helm ]; then
-      curl -sSL https://get.helm.sh/helm-v3.16.2-linux-amd64.tar.gz 2>/dev/null | tar -xz -C /tmp && cp /tmp/linux-amd64/helm /var/jenkins_home/bin/helm
-      chmod +x /var/jenkins_home/bin/helm
-    fi
-    if [ ! -f /var/jenkins_home/bin/trivy ]; then
-      curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /var/jenkins_home/bin 2>/dev/null || true
-    fi
-    if [ ! -f /var/jenkins_home/bin/sonar-scanner ]; then
-      curl -sSL -o /tmp/scanner.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip 2>/dev/null || true
-      unzip -q /tmp/scanner.zip -d /tmp/ 2>/dev/null || true
-      cp -r /tmp/sonar-scanner-*-linux-x64/* /var/jenkins_home/ 2>/dev/null || true
-      chmod +x /var/jenkins_home/bin/sonar-scanner 2>/dev/null || true
-    fi
-    if [ ! -f /var/jenkins_home/bin/docker ]; then
-      cat << '\''EOF'\'' > /var/jenkins_home/bin/docker
-#!/bin/sh
-cmd="$1"
-case "$cmd" in
-  build)
-    shift
-    tag=""
-    while [ $# -gt 0 ]; do
-      if [ "$1" = "-t" ]; then
-        shift
-        tag="$1"
-      fi
-      shift
-    done
-    echo "Built container image: $tag"
-    exit 0
-    ;;
-  push)
-    shift
-    echo "Pushed image: $1"
-    exit 0
-    ;;
-  login)
-    echo "Login Succeeded"
-    exit 0
-    ;;
-  *)
-    exit 0
-    ;;
-esac
-EOF
-      chmod +x /var/jenkins_home/bin/docker
-    fi
-  ' 2>/dev/null || true
-fi
-
-echo "Current cluster resources in votex namespace:"
-kubectl get pods,svc,pvc,pdb -n votex
-
-echo "Waiting for AWS Load Balancer DNS assignment..."
-for i in {1..12}; do
-  VOTE_HOST=$(kubectl get svc vote -n votex -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-  RESULT_HOST=$(kubectl get svc result -n votex -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-  if [ -n "$VOTE_HOST" ] && [ -n "$RESULT_HOST" ]; then
-    break
+  GET_ERR="$(kubectl get secret db-secret -n votex 2>&1 || true)"
+  if echo "$GET_ERR" | grep -qi "notfound"; then
+    echo "Bootstrapping secure 'db-secret' (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB)..."
+    openssl rand -hex 16 | tr -d '\n' | kubectl create secret generic db-secret \
+      --namespace votex \
+      --from-literal=POSTGRES_USER=postgres \
+      --from-literal=POSTGRES_DB=postgres \
+      --from-file=POSTGRES_PASSWORD=/dev/stdin \
+      --dry-run=client -o yaml | kubectl apply -f -
+    echo "Secret 'db-secret' bootstrapped successfully."
+  else
+    echo "ERROR: Unable to verify secret existence (RBAC / connectivity failure): $GET_ERR" >&2
+    exit 1
   fi
-  sleep 5
-done
+fi
 
-echo ""
-echo "Deployment complete."
-echo "Vote UI:   http://${VOTE_HOST:-pending}"
-echo "Result UI: http://${RESULT_HOST:-pending}"
-echo ""
-echo "Run ./dashboard.sh to view all service endpoints."
+echo "Publishing infrastructure parameters to cluster for Helm releases..."
+OTEL_ROLE="$(terraform -chdir="$TERRAFORM_DIR" output -raw otel_collector_role_arn 2>/dev/null || echo "")"
+if [ -z "$OTEL_ROLE" ] || [[ ! "$OTEL_ROLE" =~ ^arn:aws:iam::[0-9]+:role/.+ ]]; then
+  echo "ERROR: Failed to retrieve a valid otel_collector_role_arn from Terraform outputs." >&2
+  echo "Expected format: arn:aws:iam::<ACCOUNT_ID>:role/<ROLE_NAME>" >&2
+  echo "Received: '$OTEL_ROLE'" >&2
+  exit 1
+fi
+
+kubectl create configmap votex-cluster-config \
+  --namespace votex \
+  --from-literal=OTEL_COLLECTOR_ROLE_ARN="$OTEL_ROLE" \
+  --dry-run=client -o yaml | kubectl apply -f -
+echo "Successfully recorded OTEL_COLLECTOR_ROLE_ARN in ConfigMap votex/votex-cluster-config."
+
+echo "Cluster infrastructure bootstrap complete."
+echo "Application releases can now be deployed via Helm: helm upgrade --install votex k8s/helm/votex -f k8s/helm/votex/values-eks.yaml --namespace votex"

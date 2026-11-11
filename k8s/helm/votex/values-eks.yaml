@@ -8,10 +8,10 @@ vote:
   replicaCount: 2
   image:
     repository: aarjavjainn/votex-vote
-    tag: latest
+    tag: v2.0.0
     pullPolicy: IfNotPresent
   service:
-    type: LoadBalancer
+    type: ClusterIP
     port: 80
     targetPort: 80
     annotations: {}
@@ -50,12 +50,12 @@ result:
   replicaCount: 2
   image:
     repository: aarjavjainn/votex-result
-    tag: latest
+    tag: v2.0.0
     pullPolicy: IfNotPresent
   service:
-    type: LoadBalancer
+    type: ClusterIP
     port: 80
-    targetPort: 8080
+    targetPort: 80
     annotations: {}
   resources:
     limits:
@@ -66,13 +66,13 @@ result:
       memory: 128Mi
   probes:
     liveness:
-      path: /
+      path: /api/health
       initialDelaySeconds: 15
       periodSeconds: 10
       timeoutSeconds: 5
       failureThreshold: 3
     readiness:
-      path: /
+      path: /api/health
       initialDelaySeconds: 10
       periodSeconds: 5
       timeoutSeconds: 3
@@ -83,12 +83,12 @@ result:
     maxReplicas: 6
     targetCPUUtilizationPercentage: 75
 
-# Worker daemon (.NET)
+# Worker daemon (Python)
 worker:
   replicaCount: 1
   image:
     repository: aarjavjainn/votex-worker
-    tag: latest
+    tag: v2.0.0
     pullPolicy: IfNotPresent
   resources:
     limits:
@@ -114,6 +114,11 @@ redis:
     requests:
       cpu: 50m
       memory: 64Mi
+  persistence:
+    enabled: true
+    size: 1Gi
+    accessMode: ReadWriteOnce
+    storageClass: "gp3"
   probes:
     liveness:
       initialDelaySeconds: 10
@@ -143,9 +148,10 @@ db:
     size: 1Gi
     accessMode: ReadWriteOnce
     storageClass: "gp3"
+  existingSecret: "db-secret"
   credentials:
     username: postgres
-    password: postgres
+    password: ""
     database: postgres
   probes:
     liveness:
@@ -157,3 +163,35 @@ db:
 
 ingress:
   enabled: false
+  className: alb
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+    # alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-north-1:123456789012:certificate/example"
+  hosts:
+    - host: vote.votex.domain.tld
+      paths:
+        - path: /
+          pathType: Prefix
+          service: vote
+    - host: result.votex.domain.tld
+      paths:
+        - path: /
+          pathType: Prefix
+          service: result
+  tls: []
+
+# OpenTelemetry Distributed Tracing & Collector
+otel:
+  enabled: true
+  endpoint: "http://otel-collector:4317"
+  collector:
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.95.0"
+    awsRegion: eu-north-1
+    requireRoleArn: true
+    serviceAccount:
+      roleArn: ""

@@ -32,3 +32,18 @@ output "kubeconfig_command" {
   description = "Run this command to configure local kubectl to interact with your new cluster"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
+
+output "health_check_lambda_arn" {
+  description = "ARN of synthetic health check Lambda function"
+  value       = module.lambda.lambda_arn
+}
+
+output "otel_collector_role_arn" {
+  description = "IAM Role ARN for OpenTelemetry Collector IRSA"
+  value       = module.eks.otel_collector_role_arn
+}
+
+output "ebs_csi_role_arn" {
+  description = "IAM Role ARN for AWS EBS CSI Driver Controller IRSA"
+  value       = module.eks.ebs_csi_role_arn
+}

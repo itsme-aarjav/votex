@@ -19,7 +19,7 @@ variable "cluster_name" {
 variable "cluster_version" {
   description = "Kubernetes control plane version"
   type        = string
-  default     = "1.31"
+  default     = "1.36"
 }
 
 variable "vpc_cidr" {
@@ -43,7 +43,7 @@ variable "private_subnet_cidrs" {
 variable "node_instance_types" {
   description = "Instance types for the EKS managed node group"
   type        = list(string)
-  default     = ["c7i-flex.large"]
+  default     = ["m7i-flex.large"]
 }
 
 variable "node_desired_size" {
@@ -55,11 +55,35 @@ variable "node_desired_size" {
 variable "node_min_size" {
   description = "Minimum number of worker nodes"
   type        = number
-  default     = 1
+  default     = 2
 }
 
 variable "node_max_size" {
   description = "Maximum number of worker nodes"
   type        = number
-  default     = 3
+  default     = 2
+}
+
+variable "enable_health_check_lambda" {
+  description = "Enable external AWS Lambda synthetic health verifier"
+  type        = bool
+  default     = false
+}
+
+variable "vote_health_url" {
+  description = "Public or ingress URL for the Vote service health endpoint"
+  type        = string
+  default     = "http://vote.votex.svc.cluster.local/api/health"
+}
+
+variable "result_health_url" {
+  description = "Public or ingress URL for the Result service health endpoint"
+  type        = string
+  default     = "http://result.votex.svc.cluster.local/api/health"
+}
+
+variable "cluster_endpoint_public_access_cidrs" {
+  description = "List of approved CIDR blocks permitted to communicate with the EKS public API endpoint. Avoids unrestricted 0.0.0.0/0 exposure."
+  type        = list(string)
+  default     = ["10.0.0.0/16"]
 }

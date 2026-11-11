@@ -1,0 +1,82 @@
+---
+- name: Verify Votex Platform Kubernetes Deployment & Service Health
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_namespace: "{{ k8s_namespace | default('votex') }}"
+    expected_deployments:
+      - vote
+      - result
+      - worker
+      - redis
+      - db
+    vote_base: "{{ (vote_endpoint | default('http://vote.votex.svc.cluster.local')) | regex_replace('/api/health/?$', '') | regex_replace('/+$', '') }}"
+    result_base: "{{ (result_endpoint | default('http://result.votex.svc.cluster.local')) | regex_replace('/api/health/?$', '') | regex_replace('/+$', '') }}"
+    vote_health_url: "{{ vote_base }}/api/health"
+    result_health_url: "{{ result_base }}/api/health"
+
+  tasks:
+    - name: 1. Verify cluster connectivity
+      ansible.builtin.command: kubectl cluster-info
+      register: cluster_info
+      changed_when: false
+      failed_when: cluster_info.rc != 0
+
+    - name: 2. Check rollout status of all expected deployments
+      ansible.builtin.command: >
+        kubectl rollout status deployment/{{ item }}
+        -n {{ target_namespace }}
+        --timeout=60s
+      register: rollout_check
+      loop: "{{ expected_deployments }}"
+      changed_when: false
+      failed_when: rollout_check.rc != 0
+
+    - name: 3. Verify running pods in namespace
+      ansible.builtin.command: >
+        kubectl get pods
+        -n {{ target_namespace }}
+        --no-headers
+      register: pod_status
+      changed_when: false
+
+    - name: Assert no pods are in CrashLoopBackOff or Error state
+      ansible.builtin.assert:
+        that:
+          - "'CrashLoopBackOff' not in pod_status.stdout"
+          - "'Error' not in pod_status.stdout"
+        fail_msg: "One or more pods are in CrashLoopBackOff or Error state: {{ pod_status.stdout }}"
+        success_msg: "All pods are in healthy/running state"
+
+    - name: 4. Verify Vote Service /api/health endpoint
+      ansible.builtin.uri:
+        url: "{{ vote_health_url }}"
+        method: GET
+        status_code: 200
+        return_content: true
+        timeout: 10
+      register: vote_health
+      failed_when: vote_health.status != 200 or vote_health.json.status != 'healthy'
+
+    - name: 5. Verify Result Service /api/health endpoint
+      ansible.builtin.uri:
+        url: "{{ result_health_url }}"
+        method: GET
+        status_code: 200
+        return_content: true
+        timeout: 10
+      register: result_health
+      failed_when: result_health.status != 200 or result_health.json.status != 'healthy'
+
+    - name: 6. Deployment Verification Summary
+      ansible.builtin.debug:
+        msg:
+          - "VOTEX POST-DEPLOYMENT VERIFICATION PASSED"
+          - "Namespace: {{ target_namespace }}"
+          - "Deployments Verified: {{ expected_deployments | join(', ') }}"
+          - "Vote API Health: {{ vote_health.json.status }} (status: {{ vote_health.status }})"
+          - "Result API Health: {{ result_health.json.status }} (status: {{ result_health.status }})"
+          - "All verification gates passed successfully."
+

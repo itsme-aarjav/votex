@@ -27,40 +27,44 @@ The platform consists of a user-facing voting portal and a real-time analytics e
       Vote Service                        Result Service
       (Python Flask)                   (Node.js + Socket.IO)
             │                                   ▲
-            ▼ (LPUSH)                           │ (Real-time Broadcast)
-       Redis Queue                              │
+            ▼ (XADD / Streams)                  │ (Real-time Broadcast)
+     Redis Streams Queue                        │
             │                                   │
-            ▼ (BRPOP)                           │
+            ▼ (XREADGROUP / XAUTOCLAIM)         │
       Worker Service                            │
-       (.NET Core)                              │
+         (Python)                               │
             │                                   │
-            ▼ (INSERT)                          │
+            ▼ (Idempotent UPSERT)               │
       PostgreSQL Database (AWS EBS gp3 PVC) ────┘
 ```
 
-1. **Vote Ingestion**: Users cast votes through the Python Flask API.
-2. **Buffering**: Incoming submissions are pushed to an in-memory Redis queue (`LPUSH`) to handle high-concurrency traffic spikes.
-3. **Async Processing**: A .NET Core worker daemon continuously pops votes (`BRPOP`) and commits transactions to PostgreSQL.
+1. **Vote Ingestion**: Users cast votes through the Python Flask API with OpenTelemetry distributed trace context (`traceparent`).
+2. **Buffering**: Incoming submissions are appended to an in-memory Redis stream (`votes_stream`) and persistent queue with consumer groups to handle high-concurrency traffic spikes.
+3. **Async Processing**: A Python worker daemon continuously consumes votes via Redis Streams consumer groups (`XREADGROUP` / `XAUTOCLAIM`), preventing message loss during pod restarts, and commits idempotent transactions to PostgreSQL.
 4. **Live Dashboard**: The Node.js service watches the database and broadcasts live voting tallies via WebSockets (Socket.IO).
 
 ---
 
 ## Automated CI/CD & DevSecOps Pipeline
 
-Every code push to GitHub triggers an automated 8-stage declarative Jenkins pipeline executed directly inside the AWS EKS cluster:
+Every code push to GitHub triggers an automated 9-stage declarative Jenkins pipeline executed directly inside the AWS EKS cluster:
 
 ![Jenkins CI/CD Pipeline](docs/images/jenkins-cicd-pipeline.png)
 
 ### Pipeline Stages
 
-1. **Checkout SCM**: Pulls latest repository commit via webhook trigger.
-2. **Parallel Unit & Build Tests**: Tests Vote API (pytest), Result service (npm test), and Worker (.NET compilation).
-3. **SonarQube Code Quality**: Comprehensive static analysis and quality gate verification.
-4. **Trivy Filesystem Scan**: Scans repository dependencies and files for known CVE vulnerabilities.
-5. **Multi-Stage Docker Build**: Builds production container images for all microservices.
-6. **Trivy Container Scan**: Scans built container images for `HIGH` and `CRITICAL` vulnerabilities.
-7. **Docker Push**: Pushes tagged versioned images to Docker Hub registry.
-8. **Automated Kubernetes Rollout**: Performs zero-downtime deployment via Helm with automatic rollback on probe failure.
+1. **Checkout SCM**: Checks out source code repository and extracts release candidate metadata.
+2. **Service Build & Smoke Validation**: Validates Python syntax, Node.js syntax, dependencies, and executes background service startup smoke checks against live processes.
+3. **SonarQube Analysis & Quality Gate**: Performs static application security testing (SAST) and enforces strict quality gate thresholds.
+4. **Trivy Filesystem Scan**: Scans repository filesystem and dependencies for `HIGH` and `CRITICAL` vulnerabilities with zero tolerance.
+5. **Docker Build**: Builds deterministic, multi-stage `linux/amd64` container images for Vote, Result, Worker, and Seed data.
+6. **Trivy Image Scan**: Scans built release candidate container images for critical CVE vulnerabilities before release.
+7. **OWASP ZAP DAST**: Executes dynamic application security testing (DAST) baseline scans against candidate containers.
+8. **Docker Hub Publish**: Authenticates and publishes verified release candidate images with immutable commit tags to Docker Hub (`aarjavjainn`).
+9. **EKS Deployment & Verification**: Deploys Helm chart release with automatic rollback, checks rollout status, and runs Ansible health verification.
+
+> [!NOTE]
+> Detailed application test suites (`votex/tests/`, `votex/result/tests/`, `tests/`) are maintained locally on the developer workstation and untracked in Git. The CI pipeline executes self-contained syntax, import, and process smoke checks in Stage 2, ensuring fresh GitHub clones build cleanly without local test dependencies.
 #### Vulnerability Scanning Demonstration (Full HD Walkthrough)
 
 https://github.com/user-attachments/assets/2246317c-2834-4176-8a3f-2e7f67263f33
@@ -75,21 +79,21 @@ Static application security testing (SAST) runs automatically against all micros
 
 ---
 
-## AWS Cloud Infrastructure (eu-north-1)
+## AWS Cloud Infrastructure (Option B — eu-north-1)
 
-All infrastructure is provisioned through modular Terraform in `eu-north-1` (Stockholm):
+All cloud infrastructure is provisioned through modular Terraform in `eu-north-1` (Stockholm):
 
 ![AWS EKS EC2 Instances](docs/images/aws-eks-ec2-nodes.png)
 
 - **Isolated Custom VPC (`10.0.0.0/16`)**:
   - **2 Public Subnets** (`10.0.1.0/24`, `10.0.2.0/24`): Host the NAT Gateway and public internet-facing AWS Load Balancers.
   - **2 Private Subnets** (`10.0.11.0/24`, `10.0.12.0/24`): Host EKS worker nodes and database storage with no direct public ingress.
-- **EKS Managed Node Group**: 2x `c7i-flex.large` compute instances with 20 GB gp3 encrypted root volumes, auto-scaling from 1 to 3 nodes.
-- **Elastic Load Balancing**: Dedicated public AWS Load Balancers routing client traffic to services across multiple Availability Zones:
-
-![AWS Elastic Load Balancers](docs/images/aws-elastic-load-balancers.png)
-
-- **AWS EBS CSI Driver & gp3 StorageClass**: Dynamically provisions persistent AWS EBS gp3 volumes for PostgreSQL database data.
+- **EKS Managed Node Group (Option B)**: 2x `m7i-flex.large` compute instances (fixed size: 2 desired, 2 min, 2 max for strict cost control; providing 4 vCPU and 16 GiB total allocatable memory) with 20 GB gp3 encrypted root volumes across private subnets.
+- **Elastic Load Balancing & Service Exposure**:
+  - **Private-First Microservices**: Vote and Result services deploy as private `ClusterIP` services to prevent unauthenticated HTTP exposure over the public internet.
+  - **Online HTTPS Architecture**: The platform prepares an AWS Application Load Balancer Ingress (`ingressClassName: alb`) with SSL redirect and port 443 host-based routing for Vote, Result, Jenkins, SonarQube, and Grafana when custom domain and ACM certificates are provisioned.
+- **AWS EBS CSI Driver & gp3 StorageClass**: Dynamically provisions persistent AWS EBS gp3 volumes for PostgreSQL database, Redis persistence, Jenkins, and Prometheus with IAM Roles for Service Accounts (IRSA).
+- **Kubernetes API Security**: EKS public API endpoint access is restricted to an approved operator CIDR allowlist (`cluster_endpoint_public_access_cidrs`) with internal worker communication routed via the private VPC endpoint.
 - **Cost-Optimized NAT Gateway**: Single NAT Gateway deployed in public subnet 1 to provide outbound internet access for container pulls while keeping cloud costs minimal.
 ### AWS EKS Cluster Workloads & Deployment Status (Full HD Walkthrough)
 
@@ -144,75 +148,146 @@ https://github.com/user-attachments/assets/a50e9eeb-beac-4204-ae8f-2126364a1e32
 ## Repository Structure
 
 ```
-k8s-kind-voting-app/
-├── terraform/                # Infrastructure as Code (AWS EKS & VPC)
+votex/
+├── votex/                    # Core microservices, database, and developer tests
+│   ├── vote/                 # Python Flask microservice (API, UI, auth, session cookies)
+│   ├── result/               # Node.js Express & Socket.IO real-time analytics engine
+│   ├── worker/               # Python worker daemon (Redis Streams + idempotent PostgreSQL)
+│   ├── seed-data/            # Mock vote generator for stress and integration testing
+│   ├── db/                   # PostgreSQL schema definitions and migrations (init.sql)
+│   ├── healthchecks/         # Custom healthcheck scripts for database and cache
+│   └── tests/                # Application unit, integration, and reliability test suites (local-only)
+├── jenkins/                  # Declarative 9-stage CI/CD pipeline and agent pod specifications
+├── sonarqube/                # SonarQube static analysis configuration and quality gates
+├── docker/                   # Docker Compose multi-container development configuration
+├── terraform/                # Infrastructure as Code (AWS EKS & VPC in eu-north-1)
 │   ├── modules/
-│   │   ├── vpc/              # VPC, public & private subnets, IGW, NAT GW
-│   │   └── eks/              # EKS cluster, node group, IAM roles, EBS CSI driver
+│   │   ├── vpc/              # Isolated VPC, 2 public & 2 private subnets, IGW, NAT GW
+│   │   └── eks/              # EKS cluster, m7i-flex.large node group, IAM roles, EBS CSI IRSA
 │   ├── scripts/
-│   │   └── post_apply.sh     # Auto-configuration script triggered on apply
+│   │   └── post_apply.sh     # Decoupled post-apply cluster bootstrap script
 │   ├── main.tf               # Root module connecting VPC & EKS
 │   ├── variables.tf          # Configurable variables (defaults to eu-north-1)
 │   ├── outputs.tf            # Cluster endpoint & kubeconfig command
 │   ├── versions.tf           # Terraform & AWS provider requirements
-│   ├── terraform.tfvars      # Active configuration values
+│   ├── terraform.tfvars      # Active configuration values (git-ignored)
 │   └── README.md             # Terraform operations guide
-├── k8s/                      # Kubernetes Resources
+├── k8s/                      # Kubernetes Helm charts & StorageClass resources
 │   ├── helm/votex/           # Helm 3 chart (values.yaml & values-eks.yaml)
-│   ├── manifests/            # Raw Kubernetes YAML manifests (gp3, pdb, etc.)
-│   └── monitoring/           # Prometheus alerts, Grafana setup, Loki & Promtail
-├── vote/                     # Python Flask microservice
-├── result/                   # Node.js Express & Socket.IO microservice
-├── worker/                   # .NET Core background worker
-├── seed-data/                # Vote generator for testing
-├── tests/                    # Unit, load (k6), and resilience tests
-├── docs/                     # Documentation and media assets
-│   ├── images/               # High-resolution production screenshots
-│   └── videos/               # Compressed MP4 demonstration walkthroughs
-├── deploy.sh                 # One-click automated deployment script
-├── destroy.sh                # One-click automated teardown script
-├── dashboard.sh              # Service endpoints display script
-├── Jenkinsfile               # Declarative 8-stage CI/CD pipeline
-└── docker-compose.yml        # Local multi-container development
+│   ├── manifests/            # Independent manifests (gp3-storageclass.yaml, namespace.yaml)
+│   └── monitoring/           # Metrics server, Prometheus alert rules, Grafana values
+├── ansible/                  # Ansible automated post-deployment verification playbook
+├── lambda/                   # AWS Lambda synthetic health check verifier
+├── security/                 # Trivy filesystem/container policy and OWASP ZAP configurations
+├── tests/                    # End-to-end load (k6) and chaos resilience test suites (local-only)
+├── ops/                      # Operational deployment, dashboard, and teardown scripts
+│   ├── deploy.sh             # Infrastructure preflight plan script
+│   ├── dashboard.sh          # Dynamic service endpoint and online status inspector
+│   └── destroy.sh            # Safe teardown script with PVC purging & confirmation gate
+└── docs/                     # Architectural diagrams, screenshots, and walkthrough assets
 ```
+
+---
+
+## Feature Status & Scope Classification (Option B)
+
+To ensure production integrity and resource safety, the platform features are categorized as follows:
+
+| Component / Feature | Implementation State | Verification Level | Scope Classification |
+| :--- | :--- | :--- | :--- |
+| **Vote Flask Microservice** | Complete | Locally Tested (51 pytest, 67% coverage) | **Option B (Active Core)** |
+| **Worker Python Daemon** | Complete | Locally Tested (Integration tests) | **Option B (Active Core)** |
+| **Result Node.js Microservice** | Complete | Locally Tested (10 Node tests) | **Option B (Active Core)** |
+| **PostgreSQL & Redis Streams** | Complete | Locally Tested (Docker Compose & Helm) | **Option B (Active Core)** |
+| **OpenTelemetry / X-Ray Collector**| Complete | Configured in Helm & Local Compose | **Option B (Active Core)** |
+| **Terraform VPC & EKS (eu-north-1)** | Complete | Planned (33 add, 0 chg, 0 del) | **Option B (Cloud Infra)** |
+| **EBS gp3 Dynamic CSI (IRSA)** | Complete | Validated via Helm / Terraform | **Option B (Cloud Infra)** |
+| **Kubernetes API CIDR Allowlist** | Complete | Configured in `terraform.tfvars` | **Option B (Cloud Infra)** |
+| **Ansible Post-Deployment Verification** | Complete | Syntax-checked & Playbook ready | **Option B (Post-Deploy)** |
+| **AWS Lambda Synthetic Health Check** | Complete | Tested locally & Packaged | **Option B (Post-Deploy)** |
+| **Jenkins 9-Stage Declarative Pipeline** | Complete | Configured in `jenkins/Jenkinsfile` | **Option B (CI/CD)** |
+| **SonarQube SAST & Quality Gate** | Complete | Configured in `sonarqube/` | **Option B (DevSecOps)** |
+| **Prometheus & Grafana Observability**| Complete | Dashboards, alert rules, & values ready | **Option B (Observability)** |
+
+> [!NOTE]
+> Under **Option B**, the cluster utilizes 2x `m7i-flex.large` compute instances (4 vCPU, 16 GiB allocatable RAM), providing the memory capacity required for core microservices, CI/CD agents, and monitoring tools. Workloads are scheduled with explicit resource limits and pod anti-affinity to ensure rock-solid stability.
 
 ---
 
 ## Deployment & Operations
 
-### 1. Automated Deployment
+### 1. Preflight Infrastructure Planning
 
-Run the automated deployment script from the repository root:
+Generate and review the Terraform execution plan from the repository root:
 ```bash
-./deploy.sh
+./ops/deploy.sh
 ```
-This initializes Terraform, provisions the VPC and EKS cluster in `eu-north-1`, automatically configures `kubectl`, sets up the `gp3` storage class, and deploys Votex, Jenkins, SonarQube, and the monitoring stack.
-
-### 2. View Service Endpoints
-
-To display all public AWS Elastic Load Balancer endpoints:
+This runs `terraform init`, `terraform validate`, and outputs an execution plan to `terraform/tfplan`.
+Apply the plan only after explicit review:
 ```bash
-./dashboard.sh
+cd terraform && terraform apply tfplan && cd ..
 ```
 
-Example output:
-```text
-Votex Service Endpoints:
-  Vote UI:         http://<aws-elb-dns>
-  Result UI:       http://<aws-elb-dns>
-  Jenkins:         http://<aws-elb-dns>:8080/job/Votex-CICD/
-  GitHub Webhook:  http://<aws-elb-dns>:8080/github-webhook/
-  SonarQube:       http://<aws-elb-dns>:9000/dashboard?id=votex-platform
-  Grafana:         http://<aws-elb-dns>
-  Prometheus:      http://<aws-elb-dns>:9090
-```
+### 2. Post-Apply Cluster Bootstrap
 
-### 3. Teardown (Cost Control)
-
-To destroy all cloud resources and stop AWS charges:
+Run the post-apply bootstrap script to configure local kubeconfig, verify worker nodes, register the AWS EBS CSI driver and `gp3` StorageClass, create namespace `votex`, bootstrap `db-secret` (containing exact keys `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`), and record OpenTelemetry IRSA parameters:
 ```bash
-./destroy.sh
+bash terraform/scripts/post_apply.sh
 ```
+
+> [!NOTE]
+> `post_apply.sh` safely verifies whether `db-secret` exists. If missing, it generates a cryptographically random password piped directly via `/dev/stdin` without revealing secrets in console logs, process arguments, or Git. If already present, existing credentials are fully preserved.
+
+### 3. Build and Publish Application Images (linux/amd64)
+
+Build and publish immutable, version-tagged `linux/amd64` images to Docker Hub before the initial Helm rollout:
+```bash
+docker build --platform linux/amd64 -t aarjavjainn/votex-vote:v2.0.0 ./votex/vote
+docker build --platform linux/amd64 -t aarjavjainn/votex-result:v2.0.0 ./votex/result
+docker build --platform linux/amd64 -t aarjavjainn/votex-worker:v2.0.0 ./votex/worker
+
+docker push aarjavjainn/votex-vote:v2.0.0
+docker push aarjavjainn/votex-result:v2.0.0
+docker push aarjavjainn/votex-worker:v2.0.0
+```
+
+### 4. Deploy Votex Core Microservices via Helm (Option B)
+
+Deploy core workloads using pinned `v2.0.0` container tags and the OpenTelemetry IAM role:
+```bash
+OTEL_ROLE=$(terraform -chdir=terraform output -raw otel_collector_role_arn)
+helm upgrade --install votex ./k8s/helm/votex \
+  -f ./k8s/helm/votex/values-eks.yaml \
+  --set otel.collector.serviceAccount.roleArn="${OTEL_ROLE}" \
+  --namespace votex
+```
+
+### 5. Inspect Service Endpoints & Online HTTPS Readiness
+
+To display active service endpoints and ingress status:
+```bash
+./ops/dashboard.sh
+```
+
+Under Option B:
+- **Private Microservice Endpoints**: In the initial private phase, Vote and Result services run as private `ClusterIP` (Service port `80`) to eliminate unauthenticated HTTP exposure over the public internet.
+- **Online HTTPS Access**: When a custom domain and ACM certificate ARN are provisioned, enable the AWS Application Load Balancer Ingress (`--set ingress.enabled=true --set ingress.className=alb`) with host-based TLS routing on port 443.
+
+### 6. Post-Deployment Verification via Ansible
+
+Verify internal cluster health across application microservices using Ansible:
+```bash
+ansible-playbook ansible/verify_deployment.yml \
+  -e "k8s_namespace=votex vote_endpoint=http://vote.votex.svc.cluster.local result_endpoint=http://result.votex.svc.cluster.local"
+```
+
+### 7. Automated Teardown & Cost Elimination
+
+To safely uninstall all workloads, purge persistent EBS storage volumes, and destroy cloud infrastructure:
+```bash
+./ops/destroy.sh
+```
+The teardown script automatically uninstalls Helm releases, removes persistent volume claims (`votex-db-pvc`, `votex-redis-pvc`), plans the Terraform destroy, requires explicit confirmation (`confirm-terraform-destroy`), and audits remaining AWS resources to ensure zero lingering costs.
 
 ---
 

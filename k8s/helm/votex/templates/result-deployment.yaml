@@ -34,6 +34,20 @@ spec:
         ports:
         - containerPort: {{ .Values.result.service.targetPort }}
           name: result
+        env:
+        - name: PORT
+          value: {{ .Values.result.service.targetPort | quote }}
+        - name: POSTGRES_HOST
+          value: "db"
+        {{- if .Values.otel.enabled }}
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: {{ .Values.otel.endpoint | quote }}
+        - name: OTEL_SERVICE_NAME
+          value: "votex-result"
+        {{- end }}
+        envFrom:
+        - secretRef:
+            name: {{ include "votex.dbSecretName" . }}
         resources:
           {{- toYaml .Values.result.resources | nindent 10 }}
         livenessProbe:

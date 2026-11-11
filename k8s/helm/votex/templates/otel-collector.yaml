@@ -1,0 +1,122 @@
+{{- if .Values.otel.enabled }}
+{{- if and .Values.otel.collector.requireRoleArn (empty .Values.otel.collector.serviceAccount.roleArn) }}
+{{- fail "DEPLOYMENT FAILED: OpenTelemetry Collector on AWS requires an IAM role ARN for X-Ray IRSA. Provide --set otel.collector.serviceAccount.roleArn=<ARN> (from terraform output -raw otel_collector_role_arn)." }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "votex.fullname" . }}-otel-collector-config
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: otel-collector
+data:
+  otel-collector-config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 20
+      batch:
+        send_batch_size: 256
+        timeout: 5s
+
+    exporters:
+      awsxray:
+        region: {{ .Values.otel.collector.awsRegion | default "eu-north-1" }}
+      debug:
+        verbosity: basic
+
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, batch]
+          exporters: [awsxray, debug]
+      telemetry:
+        logs:
+          level: "info"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: otel-collector
+  {{- if and .Values.otel.collector.serviceAccount .Values.otel.collector.serviceAccount.roleArn }}
+  annotations:
+    eks.amazonaws.com/role-arn: {{ .Values.otel.collector.serviceAccount.roleArn | quote }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: otel-collector
+spec:
+  type: ClusterIP
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+      protocol: TCP
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+      protocol: TCP
+  selector:
+    app: otel-collector
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "votex.fullname" . }}-otel-collector
+  labels:
+    {{- include "votex.labels" . | nindent 4 }}
+    app: otel-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      serviceAccountName: otel-collector
+      containers:
+        - name: otel-collector
+          image: "{{ .Values.otel.collector.image.repository }}:{{ .Values.otel.collector.image.tag }}"
+          args: ["--config=/etc/otelcol/otel-collector-config.yaml"]
+          ports:
+            - name: otlp-grpc
+              containerPort: 4317
+            - name: otlp-http
+              containerPort: 4318
+          resources:
+            limits:
+              cpu: 250m
+              memory: 256Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "votex.fullname" . }}-otel-collector-config
+{{- end }}
+

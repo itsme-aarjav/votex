@@ -8,7 +8,7 @@ vote:
   replicaCount: 2
   image:
     repository: aarjavjainn/votex-vote
-    tag: latest
+    tag: v2.0.0
     pullPolicy: IfNotPresent
   service:
     type: NodePort
@@ -50,12 +50,12 @@ result:
   replicaCount: 2
   image:
     repository: aarjavjainn/votex-result
-    tag: latest
+    tag: v2.0.0
     pullPolicy: IfNotPresent
   service:
     type: NodePort
     port: 5001
-    targetPort: 8080
+    targetPort: 80
     nodePort: 31001
   resources:
     limits:
@@ -66,13 +66,13 @@ result:
       memory: 128Mi
   probes:
     liveness:
-      path: /
+      path: /api/health
       initialDelaySeconds: 15
       periodSeconds: 10
       timeoutSeconds: 5
       failureThreshold: 3
     readiness:
-      path: /
+      path: /api/health
       initialDelaySeconds: 10
       periodSeconds: 5
       timeoutSeconds: 3
@@ -83,12 +83,12 @@ result:
     maxReplicas: 8
     targetCPUUtilizationPercentage: 75
 
-# Worker daemon (.NET)
+# Worker daemon (Python)
 worker:
   replicaCount: 1
   image:
     repository: aarjavjainn/votex-worker
-    tag: latest
+    tag: v2.0.0
     pullPolicy: IfNotPresent
   resources:
     limits:
@@ -114,6 +114,10 @@ redis:
     requests:
       cpu: 50m
       memory: 64Mi
+  persistence:
+    enabled: true
+    size: 1Gi
+    accessMode: ReadWriteOnce
   probes:
     liveness:
       initialDelaySeconds: 10
@@ -142,9 +146,10 @@ db:
     enabled: true
     size: 1Gi
     accessMode: ReadWriteOnce
+  existingSecret: ""
   credentials:
     username: postgres
-    password: postgres
+    password: "postgres"
     database: postgres
   probes:
     liveness:
@@ -171,3 +176,16 @@ ingress:
         - path: /
           pathType: Prefix
           service: result
+
+# OpenTelemetry Distributed Tracing & Collector
+otel:
+  enabled: true
+  endpoint: "http://otel-collector:4317"
+  collector:
+    image:
+      repository: otel/opentelemetry-collector-contrib
+      tag: "0.95.0"
+    awsRegion: eu-north-1
+    requireRoleArn: false
+    serviceAccount:
+      roleArn: ""

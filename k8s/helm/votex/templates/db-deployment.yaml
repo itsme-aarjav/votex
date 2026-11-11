@@ -7,6 +7,8 @@ metadata:
     app: db
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: db
@@ -24,7 +26,7 @@ spec:
           value: /var/lib/postgresql/data/pgdata
         envFrom:
         - secretRef:
-            name: {{ include "votex.fullname" . }}-db-secret
+            name: {{ include "votex.dbSecretName" . }}
         ports:
         - containerPort: {{ .Values.db.service.port }}
           name: postgres
