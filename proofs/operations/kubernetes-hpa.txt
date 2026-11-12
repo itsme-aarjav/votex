@@ -1,0 +1,48 @@
+================================================================================
+KUBERNETES HORIZONTAL POD AUTOSCALER (HPA) STATUS & VERIFICATION
+================================================================================
+Cluster:      votex-cluster (eu-north-1)
+Namespace:    votex
+Deployments:  vote, result
+
+--------------------------------------------------------------------------------
+1. HPA DESCRIBE OUTPUT
+--------------------------------------------------------------------------------
+Name:                                                  result-hpa
+Namespace:                                             votex
+Reference:                                             Deployment/result
+Metrics:                                               ( current / target )
+  resource cpu on pods  (as a percentage of request):  2% (2m) / 75%
+Min replicas:                                          2
+Max replicas:                                          6
+Deployment pods:                                       2 current / 2 desired
+Conditions:
+  Type            Status  Reason            Message
+  ----            ------  ------            -------
+  AbleToScale     True    ReadyForNewScale  recommended size matches current size
+  ScalingActive   True    ValidMetricFound  the HPA was able to successfully calculate a replica count from cpu resource utilization (percentage of request)
+  ScalingLimited  True    TooFewReplicas    the desired replica count is less than the minimum replica count
+
+Name:                                                  vote-hpa
+Namespace:                                             votex
+Reference:                                             Deployment/vote
+Metrics:                                               ( current / target )
+  resource cpu on pods  (as a percentage of request):  4% (4m) / 70%
+Min replicas:                                          2
+Max replicas:                                          6
+Deployment pods:                                       2 current / 2 desired
+Conditions:
+  Type            Status  Reason            Message
+  ----            ------  ------            -------
+  AbleToScale     True    ReadyForNewScale  recommended size matches current size
+  ScalingActive   True    ValidMetricFound  the HPA was able to successfully calculate a replica count from cpu resource utilization (percentage of request)
+  ScalingLimited  True    TooFewReplicas    the desired replica count is less than the minimum replica count
+
+--------------------------------------------------------------------------------
+2. ENGINEERING ANALYSIS & INTERVIEW NOTES
+--------------------------------------------------------------------------------
+- Metrics Pipeline: Fully operational via Kubernetes Metrics Server. Both HPAs report ScalingActive=True and successfully sample real-time pod CPU consumption.
+- Current State: Maintaining configured baseline of 2 replicas each (Min: 2, Max: 6).
+- Thresholds: Vote CPU target = 70%; Result CPU target = 75%.
+- Scale-up Status: During the baseline k6 load test (129 requests / p95 272ms), CPU utilization peaked at 4% for Vote and 2% for Result. Because load did not breach the 70% threshold, the HPA correctly did not trigger replica expansion. A genuine scale-up event is not yet proven by this baseline snapshot and would require an extended stress run exceeding the 70% CPU threshold.
+================================================================================

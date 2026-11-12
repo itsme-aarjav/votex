@@ -1,0 +1,43 @@
+
+PLAY [Verify Votex Platform Kubernetes Deployment & Service Health] ************
+
+TASK [1. Verify cluster connectivity] ******************************************
+ok: [localhost]
+
+TASK [2. Check rollout status of all expected deployments] *********************
+ok: [localhost] => (item=vote)
+ok: [localhost] => (item=result)
+ok: [localhost] => (item=worker)
+ok: [localhost] => (item=redis)
+ok: [localhost] => (item=db)
+
+TASK [3. Verify running pods in namespace] *************************************
+ok: [localhost]
+
+TASK [Assert no pods are in CrashLoopBackOff or Error state] *******************
+ok: [localhost] => {
+    "changed": false,
+    "msg": "All pods are in healthy/running state"
+}
+
+TASK [4. Verify Vote Service /api/health endpoint] *****************************
+ok: [localhost]
+
+TASK [5. Verify Result Service /api/health endpoint] ***************************
+ok: [localhost]
+
+TASK [6. Deployment Verification Summary] **************************************
+ok: [localhost] => {
+    "msg": [
+        "VOTEX POST-DEPLOYMENT VERIFICATION PASSED",
+        "Namespace: votex",
+        "Deployments Verified: vote, result, worker, redis, db",
+        "Vote API Health: healthy (status: 200)",
+        "Result API Health: healthy (status: 200)",
+        "All verification gates passed successfully."
+    ]
+}
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=7    changed=0    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0   
+

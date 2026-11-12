@@ -1,0 +1,82 @@
+================================================================================
+POSTGRESQL DISASTER RECOVERY & LOGICAL RESTORE VERIFICATION - LIVE AWS PROOF
+================================================================================
+Playbook:          ansible/backup_restore_verify.yml
+Namespace:         votex
+Execution Date:    Thu Nov 12 20:17:53 UTC 2026 (2026-11-13T01:47:53+05:30)
+Database Pod:      db-5fff4765cc-2mwtj
+Database Name:     postgres
+
+TASK [0. Initialize deterministic backup facts] ********************************
+ok: [localhost]
+
+TASK [Set deterministic backup and verification paths] *************************
+ok: [localhost]
+
+TASK [1. Verify cluster connectivity and context] ******************************
+ok: [localhost]
+
+TASK [2. Locate PostgreSQL Pod in target namespace] ****************************
+ok: [localhost]
+
+TASK [Set DB Pod Name] *********************************************************
+ok: [localhost]
+
+TASK [Verify PostgreSQL Pod phase is Running] **********************************
+ok: [localhost]
+
+TASK [3. Verify PostgreSQL service readiness] **********************************
+ok: [localhost]
+
+TASK [4. Query source database row count (strict failure enforcement)] *********
+ok: [localhost] => Source rows: 10
+
+TASK [5. Perform logical database backup via pg_dump] **************************
+changed: [localhost] => File: /tmp/votex_backup_20261113_014720.dump (Format: custom -Fc)
+
+TASK [6. Verify backup file existence and non-zero size] ***********************
+ok: [localhost] => Size: 14100 bytes
+
+TASK [Verify backup archive header and table catalog integrity] ****************
+ok: [localhost] => Table 'votes' found in archive catalog
+
+TASK [Informative Notice if S3 durable archiving is not configured] ************
+ok: [localhost] => "S3 backup bucket not specified. Disaster recovery verification executed in temporary/local-only mode."
+Notice: This test validates non-destructive in-cluster logical backup and recovery. S3 durable archiving is configured when a dedicated backup bucket is provided.
+
+TASK [9. Create isolated temporary database for non-destructive restore verification] ***
+changed: [localhost] => Database: votex_verify_20261113_014720
+
+TASK [10. Restore backup dump into isolated temporary database (strict rc=0)] ***
+changed: [localhost] => pg_restore completed successfully (rc=0)
+
+TASK [11. Verify restored schema and tables in temporary database] *************
+ok: [localhost] => Verified table 'votes' in information_schema
+
+TASK [12. Check table row count in restored temporary database] ****************
+ok: [localhost] => Restored rows: 10
+
+TASK [13. Assert restored database schema and row count match source] **********
+ok: [localhost] => "Recovery verification passed: 'votes' schema and row count (10) match source."
+
+TASK [14. Backup & Recovery Verification Summary] ******************************
+ok: [localhost] => [
+    "POSTGRESQL DISASTER RECOVERY VERIFICATION: SUCCESS",
+    "Namespace: votex",
+    "Pod: db-5fff4765cc-2mwtj",
+    "Verified Backup Size: 14100 bytes",
+    "Source Vote Rows: 10",
+    "Restored Vote Rows: 10",
+    "Schema Integrity: VERIFIED",
+    "Production Database State: UNTOUCHED & SAFE"
+]
+
+TASK [Always clean up temporary verification database] *************************
+changed: [localhost] => Database votex_verify_20261113_014720 dropped
+
+TASK [Always clean up temporary remote backup file] ****************************
+changed: [localhost] => /tmp/votex_backup_20261113_014720.dump deleted
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=25   changed=5    unreachable=0    failed=0    skipped=4    rescued=0    ignored=0   
+================================================================================

@@ -1,0 +1,33 @@
+================================================================================
+VOTEX AWS COST & RUNTIME AUDIT
+================================================================================
+AWS Account:           592668326948
+Region:                eu-north-1 (Stockholm)
+Audit Date:            Thu Nov 12 20:45:00 UTC 2026 (2026-11-13T02:15:00+05:30)
+Maximum Budget Cap:    ₹1,000 INR (~$11.50 USD)
+Preferred Cost:        ₹500 - ₹750 INR (~$5.75 - $8.60 USD)
+
+Chargeable Resources Runtime:
+- EKS Control Plane:   Launched ~16:42 UTC (~4.0 hours runtime)
+- EC2 Worker Nodes:    2x m7i-flex.large launched ~16:52 UTC (~3.85 hours runtime)
+- NAT Gateway:         1x available since ~16:43 UTC (~4.0 hours runtime)
+- ALB:                 1x active since ~18:19 UTC (~2.45 hours runtime)
+- EBS gp3 Volumes:     2x 20GB root + 7 PVCs (~68GB) = ~108GB aggregate (~3.85 hours runtime)
+- AWS Lambda:          Synthetic health check (Python 3.11, 128MB, free tier eligible)
+- CloudWatch:          Metrics, alarms, and log groups (~250MB logs)
+- Route 53:            1 hosted zone (pro-rated daily) + DNS queries
+
+Cost Breakdown (Estimated Accrued Unbilled):
+- EKS Cluster:         4.0 hrs @ $0.1000/hr               = $0.400 USD (~₹34.80 INR)
+- EC2 Instances:       2x 3.85 hrs @ $0.0988/hr           = $0.761 USD (~₹66.20 INR)
+- NAT Gateway:         4.0 hrs @ $0.0450/hr + data proc   = $0.203 USD (~₹17.65 INR)
+- ALB:                 2.45 hrs @ $0.0225/hr + LCU        = $0.060 USD (~₹5.22 INR)
+- EBS Storage:         gp3 volume hours                   = $0.016 USD (~₹1.40 INR)
+- Route 53 / CW Logs:  DNS + metric puts + logs           = $0.040 USD (~₹3.48 INR)
+--------------------------------------------------------------------------------
+TOTAL ESTIMATED ACCRUED RUNTIME EXPENDITURE:              ~$1.48 USD (~₹128.75 INR)
+TOTAL SETTLED (Cost Explorer day-1 lag):                  ~$0.00 USD
+REMAINING BUDGET (out of ₹1,000 INR cap):                 ~₹871.25 INR (~87.1% remaining)
+BURN RATE:                                                ~$0.365 USD/hour (~₹31.75 INR/hr)
+Headroom:                                                 >27 hours before reaching ₹1,000 cap
+================================================================================

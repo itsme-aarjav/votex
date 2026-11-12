@@ -72,14 +72,20 @@ Live Jenkins pipeline evidence will be captured during the approved AWS demo.
 | **6** | **Trivy Image Scan** | Trivy CLI | Container vulnerability scanner. Evaluates OS base layers and binary packages in built release candidate images before publication. Blocks on `CRITICAL` CVEs. |
 | **7** | **OWASP ZAP DAST** | OWASP ZAP container | Dynamic Application Security Testing (DAST). Boots candidate release in an isolated Docker network and performs active baseline security scans against live HTTP endpoints. |
 | **8** | **Docker Hub Publish** | Docker CLI, Credential Store | Authenticates and publishes verified immutable release tags (`v2.1.${BUILD_NUMBER}-${SHA}`) to Docker Hub (`aarjavjainn`). |
-| **9** | **EKS Deployment & Verification** | Helm 3/4, kubectl, Ansible | Selects version-compatible rollback behavior; verifies rollout and Ansible checks, and tests restoring the previously deployed revision on post-deploy failure. Live proof pending. |
+| **9** | **EKS Deployment & Verification** | Helm 3/4, kubectl, Ansible | Selects version-compatible rollback behavior; verifies rollout and Ansible checks, and tests restoring the previously deployed revision on post-deploy failure. Verified live in [`proofs/ci-cd/`](proofs/ci-cd/). |
 
 > [!NOTE]
 > Application unit and integration test results were independently verified offline before pre-deployment workspace cleanup. CI Stage 2 executes standalone syntax, import, dependency, and process smoke checks, ensuring deterministic, hermetic pipeline builds on clean repository checkouts.
 
-### SonarQube Quality Gate Evidence
+### Centralized Live Operational Proofs Repository
 
-Live SonarQube Quality Gate screenshots will be captured during the approved AWS demo.
+All genuine tool-generated reports, vulnerability findings, terminal test outputs, and AWS infrastructure states produced during the live AWS deployment (verified through Jenkins builds #16 and #17) are preserved in [`proofs/`](proofs/):
+
+- [`proofs/security/`](proofs/security/): Raw Trivy scanner reports (FS console excerpt & 3 container images: 0 High/Critical) and raw OWASP ZAP DAST artifacts (`zap-report.html` and `zap-report.json`).
+- [`proofs/ci-cd/`](proofs/ci-cd/): Jenkins Build #16 pipeline execution metadata (9/9 stages SUCCESS), Ansible post-deployment verification.
+- [`proofs/operations/`](proofs/operations/): k6 load testing (903 checks passed, 129 votes, p95 272ms), Chaos pod self-healing logs (Worker 5s, Redis 7s), PostgreSQL non-destructive DR restore verification, Helm release history (Revisions 1–14), and Kubernetes HPA describe analysis.
+- [`proofs/aws/`](proofs/aws/): Terraform managed resources list (36 resources) and live AWS cost & runtime audit.
+- [`proofs/screenshots/`](proofs/screenshots/): 22 genuine production dashboard screenshots personally captured by the owner across `application/`, `ci-cd/`, `security/`, `observability/`, and `aws/`.
 
 ---
 

@@ -1,0 +1,37 @@
+================================================================================
+VOTEX CHAOS & RESILIENCE ENGINEERING VERIFICATION - LIVE AWS PROOF
+================================================================================
+Script:            tests/resilience/chaos-test.sh --confirm
+Target Cluster:    votex-cluster
+Target Region:     eu-north-1
+Target Account:    592668326948
+Execution Date:    Thu Nov 12 20:16:23 UTC 2026 (2026-11-13T01:46:23+05:30)
+
+[INFO] Starting Votex Resilience & Chaos Verification Suite
+[INFO] Target Cluster:   votex-cluster
+[INFO] Target Region:    eu-north-1
+[INFO] Target Namespace: votex
+[INFO] Dry Run:          false
+[INFO] Current Kubernetes Context: arn:aws:eks:eu-north-1:592668326948:cluster/votex-cluster
+[INFO] Verified EKS account, region and active endpoint.
+[INFO] Discovering target workloads in namespace 'votex'...
+
+Test 1: PersistentVolumeClaim Data Protection (Non-destructive)
+[INFO] Test 1: Verifying PostgreSQL PersistentVolumeClaim binding & integrity...
+[PASS] PostgreSQL PVC is Bound and healthy (data volume is protected).
+       PVC: votex-db-pvc (Volume: pvc-e316deec-b4dc-4b94-899c-3682c62fd152, Capacity: 1Gi, StorageClass: gp3)
+
+Test 2: Worker Daemon Pod Failure & Self-Healing
+[INFO] Test 2: Testing Worker pod self-healing and queue recovery...
+[INFO] Terminating Worker pod: worker-cb84b76bc-88kbd (UID: e9823383-9e27-4333-bcab-62fa3984f7de)
+[INFO] Waiting for ReplicaSet to recreate Worker pod...
+[PASS] Worker self-healed: new pod worker-cb84b76bc-r9xkp (UID: 1f8da06c-3e75-48aa-808f-efa8b0c574a1) is Ready=True in 5s.
+
+Test 3: Redis In-Memory Queue Interruption & Self-Healing
+[INFO] Test 3: Testing Redis queue pod restart recovery...
+[INFO] Terminating Redis pod: redis-856ffd5c86-4xw7x (UID: 158d3a2d-cf1b-4ecf-9eee-dbedaf8f18c3)
+[INFO] Waiting for Redis pod reconciliation...
+[PASS] Redis self-healed: new pod redis-856ffd5c86-qlzkp (UID: 236b1ce9-3ceb-4ece-a720-0c62a0dfcd3b) is Ready=True in 7s.
+
+[PASS] Resilience and chaos verification completed successfully.
+================================================================================

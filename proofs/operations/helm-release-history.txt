@@ -1,0 +1,11 @@
+REVISION	UPDATED                 	STATUS    	CHART      	APP VERSION	DESCRIPTION                                                                               
+5       	Thu Nov 12 23:52:42 2026	superseded	votex-2.0.0	2.0.0      	Upgrade complete                                                                          
+6       	Fri Nov 13 00:00:04 2026	superseded	votex-2.0.0	2.0.0      	Upgrade complete                                                                          
+7       	Thu Nov 12 19:41:45 2026	failed    	votex-2.0.0	2.0.0      	Upgrade "votex" failed: resource Deployment/votex/db not ready. status: Unknown, messag...
+8       	Thu Nov 12 19:46:47 2026	failed    	votex-2.0.0	2.0.0      	Release "votex" failed: resource Deployment/votex/db not ready. status: Unknown, messag...
+9       	Fri Nov 13 01:19:31 2026	superseded	votex-2.0.0	2.0.0      	Rollback to 6                                                                             
+10      	Fri Nov 13 01:20:19 2026	superseded	votex-2.0.0	2.0.0      	Upgrade complete                                                                          
+11      	Thu Nov 12 19:59:20 2026	superseded	votex-2.0.0	2.0.0      	Upgrade complete                                                                          
+12      	Thu Nov 12 20:00:02 2026	superseded	votex-2.0.0	2.0.0      	Rollback to 10                                                                            
+13      	Thu Nov 12 20:13:11 2026	superseded	votex-2.0.0	2.0.0      	Upgrade complete                                                                          
+14      	Thu Nov 12 20:27:57 2026	deployed  	votex-2.0.0	2.0.0      	Upgrade complete                                                                          

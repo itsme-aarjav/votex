@@ -1,0 +1,55 @@
+================================================================================
+VOTEX LOAD & AUTOSCALING TEST (k6) - LIVE AWS OPERATIONAL PROOF
+================================================================================
+Target URL:        https://vote.votex.aarjav.site
+Execution Date:    Thu Nov 12 20:15:36 UTC 2026 (2026-11-13T01:45:36+05:30)
+Tool Version:      k6 v2.3.0 (commit/e088784614, go1.27.1, linux/arm64)
+Profile:           baseline (up to 10 looping VUs, 30s duration)
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<1000' p(95)=272.7ms
+
+    server_failures_5xx
+    ✓ 'count<1' count=0
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 903     29.399858/s
+    checks_succeeded...: 100.00% 903 out of 903
+    checks_failed......: 0.00%   0 out of 903
+
+    ✓ health check status is 200
+    ✓ health returns healthy status
+    ✓ config fetch status is 200
+    ✓ config contains csrf_token
+    ✓ comments fetch status is 200
+    ✓ vote response received
+    ✓ vote no server 5xx failure
+
+    CUSTOM
+    server_failures_5xx............: 0       0/s
+    successful_votes...............: 129     4.19998/s
+    vote_submission_duration.......: avg=289.272577 min=188.909833 med=210.301126 max=966.051834 p(90)=580.198633 p(95)=660.405717
+    vote_success_rate..............: 100.00% 129 out of 129
+
+    HTTP
+    http_req_duration..............: avg=214.85ms   min=166.43ms   med=191.1ms    max=966.05ms   p(90)=226.7ms    p(95)=272.7ms   
+      { expected_response:true }...: avg=214.85ms   min=166.43ms   med=191.1ms    max=966.05ms   p(90)=226.7ms    p(95)=272.7ms   
+    http_req_failed................: 0.00%   0 out of 516
+    http_reqs......................: 516     16.799919/s
+
+    EXECUTION
+    iteration_duration.............: avg=1.28s      min=983.22ms   med=1.18s      max=2.57s      p(90)=1.69s      p(95)=2.04s     
+    iterations.....................: 129     4.19998/s
+    vus............................: 2       min=1          max=10
+    vus_max........................: 10      min=10         max=10
+
+    NETWORK
+    data_received..................: 8.8 MB  287 kB/s
+    data_sent......................: 97 kB   3.2 kB/s
+
+Outcome: PASS (100% checks passed, 0 server errors, threshold p95 met)
+================================================================================

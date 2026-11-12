@@ -1,0 +1,77 @@
+{
+  "name": "#16",
+  "status": "SUCCESS",
+  "durationMillis": 452203,
+  "stages": [
+    {
+      "name": "Declarative: Checkout SCM",
+      "status": "SUCCESS",
+      "durationMillis": 12173
+    },
+    {
+      "name": "1. Checkout SCM",
+      "status": "SUCCESS",
+      "durationMillis": 2442
+    },
+    {
+      "name": "2. Service Build & Smoke Validation",
+      "status": "SUCCESS",
+      "durationMillis": 110
+    },
+    {
+      "name": "Validate: Vote Service (Python)",
+      "status": "SUCCESS",
+      "durationMillis": 28848
+    },
+    {
+      "name": "Validate: Result Service (Node.js)",
+      "status": "SUCCESS",
+      "durationMillis": 11716
+    },
+    {
+      "name": "Validate: Worker Daemon (Python)",
+      "status": "SUCCESS",
+      "durationMillis": 26056
+    },
+    {
+      "name": "3. SonarQube Analysis & Quality Gate",
+      "status": "SUCCESS",
+      "durationMillis": 61828
+    },
+    {
+      "name": "4. Trivy Filesystem Scan",
+      "status": "SUCCESS",
+      "durationMillis": 20515
+    },
+    {
+      "name": "5. Docker Build",
+      "status": "SUCCESS",
+      "durationMillis": 48403
+    },
+    {
+      "name": "6. Trivy Image Scan",
+      "status": "SUCCESS",
+      "durationMillis": 70334
+    },
+    {
+      "name": "7. OWASP ZAP DAST",
+      "status": "SUCCESS",
+      "durationMillis": 114334
+    },
+    {
+      "name": "8. Docker Hub Publish",
+      "status": "SUCCESS",
+      "durationMillis": 35696
+    },
+    {
+      "name": "9. EKS Deployment & Verification",
+      "status": "SUCCESS",
+      "durationMillis": 47749
+    },
+    {
+      "name": "Declarative: Post Actions",
+      "status": "SUCCESS",
+      "durationMillis": 238
+    }
+  ]
+}
