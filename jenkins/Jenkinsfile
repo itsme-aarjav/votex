@@ -18,8 +18,8 @@ spec:
       image: jenkins/inbound-agent:3283.v92c105e0f819-1
       resources:
         requests:
-          cpu: 100m
-          memory: 128Mi
+          cpu: 25m
+          memory: 64Mi
         limits:
           cpu: 500m
           memory: 512Mi
@@ -34,8 +34,8 @@ spec:
           mountPath: /var/run
       resources:
         requests:
-          cpu: 200m
-          memory: 384Mi
+          cpu: 50m
+          memory: 128Mi
         limits:
           cpu: 1000m
           memory: 1536Mi
@@ -45,8 +45,8 @@ spec:
       args: ["99d"]
       resources:
         requests:
-          cpu: 50m
-          memory: 64Mi
+          cpu: 10m
+          memory: 32Mi
         limits:
           cpu: 500m
           memory: 512Mi
@@ -56,8 +56,8 @@ spec:
       args: ["99d"]
       resources:
         requests:
-          cpu: 50m
-          memory: 64Mi
+          cpu: 10m
+          memory: 32Mi
         limits:
           cpu: 500m
           memory: 512Mi
@@ -67,8 +67,8 @@ spec:
       args: ["99d"]
       resources:
         requests:
-          cpu: 50m
-          memory: 64Mi
+          cpu: 10m
+          memory: 32Mi
         limits:
           cpu: 1000m
           memory: 1024Mi
@@ -84,8 +84,8 @@ spec:
           mountPath: /var/run
       resources:
         requests:
-          cpu: 50m
-          memory: 64Mi
+          cpu: 10m
+          memory: 32Mi
         limits:
           cpu: 500m
           memory: 512Mi
@@ -101,8 +101,8 @@ spec:
           mountPath: /var/run
       resources:
         requests:
-          cpu: 50m
-          memory: 64Mi
+          cpu: 10m
+          memory: 32Mi
         limits:
           cpu: 1000m
           memory: 1024Mi
@@ -110,8 +110,8 @@ spec:
       image: redis:alpine
       resources:
         requests:
-          cpu: 50m
-          memory: 64Mi
+          cpu: 10m
+          memory: 32Mi
         limits:
           cpu: 250m
           memory: 256Mi
@@ -126,8 +126,8 @@ spec:
           value: postgres
       resources:
         requests:
-          cpu: 100m
-          memory: 128Mi
+          cpu: 20m
+          memory: 64Mi
         limits:
           cpu: 500m
           memory: 512Mi
@@ -137,8 +137,8 @@ spec:
       args: ["99d"]
       resources:
         requests:
-          cpu: 50m
-          memory: 64Mi
+          cpu: 10m
+          memory: 32Mi
         limits:
           cpu: 500m
           memory: 512Mi
@@ -169,7 +169,6 @@ spec:
         disableConcurrentBuilds()
         buildDiscarder(logRotator(numToKeepStr: '20'))
         timeout(time: 45, unit: 'MINUTES')
-        timestamps()
     }
 
     stages {

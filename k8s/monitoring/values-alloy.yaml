@@ -37,7 +37,7 @@ alloy:
         rule {
           source_labels = ["__meta_kubernetes_pod_node_name"]
           action        = "keep"
-          regex         = coalesce(sys.env("NODE_NAME"), sys.env("HOSTNAME"))
+          regex         = coalesce(env("NODE_NAME"), env("HOSTNAME"))
         }
 
         rule {

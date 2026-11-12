@@ -23,6 +23,7 @@ loki:
     retention_enabled: true
     compaction_interval: 10m
     retention_delete_delay: 2h
+    delete_request_store: filesystem
   limits_config:
     retention_period: 168h # 7 days
     max_query_length: 168h

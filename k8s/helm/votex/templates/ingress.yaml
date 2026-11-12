@@ -7,7 +7,15 @@ metadata:
     {{- include "votex.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
+    {{- range $key, $value := . }}
+    {{- if and (eq $key "kubernetes.io/ingress.class") (ne $.Values.ingress.className "nginx") }}
+    {{- /* Skip conflicting ingress.class annotation when not using nginx */}}
+    {{- else if and (hasPrefix "nginx.ingress.kubernetes.io" $key) (ne $.Values.ingress.className "nginx") }}
+    {{- /* Skip nginx annotations when not using nginx */}}
+    {{- else if $value }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+    {{- end }}
   {{- end }}
 spec:
   {{- if .Values.ingress.className }}

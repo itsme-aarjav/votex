@@ -22,6 +22,7 @@ spec:
       labels:
         app: vote
     spec:
+      enableServiceLinks: false
       terminationGracePeriodSeconds: 30
       containers:
       - name: vote
@@ -47,6 +48,8 @@ spec:
           value: "db"
         - name: REDIS_HOST
           value: "redis"
+        - name: REDIS_PORT
+          value: {{ .Values.redis.service.port | quote }}
         {{- if .Values.otel.enabled }}
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
           value: {{ .Values.otel.endpoint | quote }}

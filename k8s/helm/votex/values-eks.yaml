@@ -18,10 +18,10 @@ vote:
   resources:
     limits:
       cpu: 500m
-      memory: 256Mi
+      memory: 384Mi
     requests:
       cpu: 100m
-      memory: 128Mi
+      memory: 256Mi
   probes:
     liveness:
       path: /api/health
@@ -40,11 +40,11 @@ vote:
     minReplicas: 2
     maxReplicas: 6
     targetCPUUtilizationPercentage: 70
-    targetMemoryUtilizationPercentage: 80
+    targetMemoryUtilizationPercentage: null
   env:
     optionA: "Cats"
     optionB: "Dogs"
-    resultUrl: "https://result.votex.domain.tld"
+    resultUrl: "https://result.votex.aarjav.site"
 
 # Result service (Node.js)
 result:
@@ -84,7 +84,7 @@ result:
     maxReplicas: 6
     targetCPUUtilizationPercentage: 75
   env:
-    voteUrl: "https://vote.votex.domain.tld"
+    voteUrl: "https://vote.votex.aarjav.site"
 
 # Worker daemon (Python)
 worker:
@@ -165,7 +165,7 @@ db:
       periodSeconds: 5
 
 ingress:
-  enabled: false
+  enabled: true
   className: alb
   annotations:
     alb.ingress.kubernetes.io/group.name: "votex-platform"
@@ -174,16 +174,14 @@ ingress:
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
-    kubernetes.io/ingress.class: null
-    nginx.ingress.kubernetes.io/proxy-body-size: null
-    # alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-north-1:123456789012:certificate/example"
+    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-north-1:592668326948:certificate/4c48940e-b561-406a-b8b2-994285e2d930"
   hosts:
-    - host: vote.votex.domain.tld
+    - host: vote.votex.aarjav.site
       paths:
         - path: /
           pathType: Prefix
           service: vote
-    - host: result.votex.domain.tld
+    - host: result.votex.aarjav.site
       paths:
         - path: /
           pathType: Prefix

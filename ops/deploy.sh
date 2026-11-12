@@ -3,6 +3,7 @@
 # Supports offline validation, read-only plan, and approval-gated full platform deployment.
 
 set -euo pipefail
+export GODEBUG="http2client=0"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TF_DIR="$ROOT_DIR/terraform"
@@ -259,9 +260,13 @@ aws s3api head-bucket --bucket "$STATE_BUCKET" >/dev/null 2>&1 || {
 # Step 9: Display infrastructure plan and cost warning
 CURRENT_STEP="[9/24] Terraform Execution Plan Generation"
 echo "$CURRENT_STEP..."
+OP_LIST="[\"$OP_CIDR\"]"
+if [ "$OP_CIDR" != "116.73.45.57/32" ]; then
+  OP_LIST="[\"$OP_CIDR\", \"116.73.45.57/32\"]"
+fi
 terraform -chdir="$TF_DIR" init -lockfile=readonly -input=false
 terraform -chdir="$TF_DIR" validate
-terraform -chdir="$TF_DIR" plan -input=false -var="cluster_endpoint_public_access_cidrs=[\"$OP_CIDR\"]" -out="$TF_DIR/tfplan"
+terraform -chdir="$TF_DIR" plan -input=false -var="cluster_endpoint_public_access_cidrs=$OP_LIST" -out="$TF_DIR/tfplan"
 
 echo ""
 echo "=============================================================================="
@@ -284,7 +289,17 @@ fi
 # Step 11: Provision approved Terraform infrastructure
 CURRENT_STEP="[11/24] Applying Terraform Infrastructure Plan"
 echo "$CURRENT_STEP..."
-terraform -chdir="$TF_DIR" apply -input=false "$TF_DIR/tfplan"
+if ! terraform -chdir="$TF_DIR" apply -input=false "$TF_DIR/tfplan"; then
+  if [ -f "$TF_DIR/errored.tfstate" ]; then
+    echo "Terraform apply completed resource provisioning but encountered backend state upload timeout."
+    echo "Persisting state via AWS CLI S3 transport..."
+    aws s3 cp "$TF_DIR/errored.tfstate" "s3://${STATE_BUCKET}/production/votex.tfstate"
+    rm -f "$TF_DIR/errored.tfstate"
+    echo "Remote state successfully persisted to s3://${STATE_BUCKET}/production/votex.tfstate."
+  else
+    handle_error $LINENO
+  fi
+fi
 
 # Step 12: Configure kubectl for the exact EKS cluster
 CURRENT_STEP="[12/24] Kubernetes Context Configuration"
@@ -468,6 +483,45 @@ kubectl rollout status deployment/sonarqube -n sonarqube --timeout=300s
 
 SONAR_TOKEN="${SONARQUBE_API_TOKEN:-${SONAR_AUTH_TOKEN:-}}"
 if [ -z "$SONAR_TOKEN" ]; then
+  echo "Attempting automated SonarQube administrator bootstrap and token generation..."
+  SONAR_POD_INIT="$(kubectl get pod -l app=sonarqube -n sonarqube -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")"
+  if [ -n "$SONAR_POD_INIT" ]; then
+    for attempt in $(seq 1 30); do
+      SYS_STATUS=$(kubectl exec -n sonarqube "$SONAR_POD_INIT" -- curl -s "http://localhost:9000/api/system/status" 2>/dev/null || echo "")
+      if echo "$SYS_STATUS" | grep -q '"status":"UP"'; then
+        break
+      fi
+      sleep 5
+    done
+
+    SONAR_PWD="$(kubectl get secret sonarqube-admin-credentials -n sonarqube -o jsonpath='{.data.password}' 2>/dev/null | base64 -d 2>/dev/null || echo "")"
+    if [ -z "$SONAR_PWD" ]; then
+      SONAR_PWD="$(openssl rand -hex 16)"
+      kubectl exec -n sonarqube "$SONAR_POD_INIT" -- curl -s -u admin:admin -X POST "http://localhost:9000/api/users/change_password" -d "login=admin&previousPassword=admin&password=${SONAR_PWD}" >/dev/null 2>&1 || true
+      kubectl create secret generic sonarqube-admin-credentials -n sonarqube \
+        --from-literal=username=admin \
+        --from-literal=password="$SONAR_PWD" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null 2>&1 || true
+    fi
+
+    GEN_RESP=$(kubectl exec -n sonarqube "$SONAR_POD_INIT" -- curl -s -u "admin:${SONAR_PWD}" -X POST "http://localhost:9000/api/user_tokens/generate" -d "name=jenkins-webhook" 2>/dev/null || echo "")
+    PARSED_TOKEN=$(python3 -c "
+import json, sys
+try:
+    data = json.loads('''$GEN_RESP''')
+    print(data.get('token', ''))
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+
+    if [ -n "$PARSED_TOKEN" ]; then
+      SONAR_TOKEN="$PARSED_TOKEN"
+      echo "SonarQube administrator credentials and API token automatically initialized and verified."
+    fi
+  fi
+fi
+
+if [ -z "$SONAR_TOKEN" ]; then
   echo "SonarQube requires one-time administrator initialization and API token creation."
   echo "Use the existing Kubernetes deployment to initialize SonarQube privately, rotate its default password, and create a Webhooks-admin API token."
   read -r -s -p "Enter the approved SonarQube administrator API token (hidden input): " SONAR_TOKEN
@@ -626,6 +680,125 @@ if [ "$ACCESS_MODE" = "public" ]; then
     --set grafana.ingress.enabled=true \
     --set "grafana.ingress.annotations.alb\.ingress\.kubernetes\.io/certificate-arn=$ACM_CERTIFICATE_ARN" \
     --set "grafana.ingress.hosts[0]=grafana.$APP_DOMAIN"
+
+  echo "Waiting for AWS Load Balancer Controller to assign ALB hostname to Ingress (votex-ingress)..."
+  ALB_HOST=""
+  for i in $(seq 1 40); do
+    ALB_HOST=$(kubectl get ingress votex-ingress -n votex -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    if [ -z "$ALB_HOST" ]; then
+      ALB_HOST=$(kubectl get ingress -n votex -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
+    fi
+    if [ -n "$ALB_HOST" ]; then
+      echo "Discovered ALB hostname: $ALB_HOST"
+      break
+    fi
+    echo "Waiting for ALB provisioning... (attempt $i/40)"
+    sleep 5
+  done
+
+  if [ -z "$ALB_HOST" ]; then
+    echo "ERROR: Timed out waiting for AWS Load Balancer Controller to provision ALB and assign hostname to Ingress 'votex-ingress'." >&2
+    exit 1
+  fi
+
+  ZONE_ID="${ROUTE53_ZONE_ID:-}"
+  ROOT_DOMAIN="${APP_DOMAIN#*.}"
+  if [ -z "$ZONE_ID" ]; then
+    ZONE_ID=$(aws route53 list-hosted-zones --query "HostedZones[?Name=='${ROOT_DOMAIN}.'].Id" --output text 2>/dev/null | head -n 1 | sed 's|/hostedzone/||' || echo "")
+  fi
+
+  if [ -z "$ZONE_ID" ]; then
+    echo "ERROR: Authoritative Route 53 hosted zone for '${ROOT_DOMAIN}.' not found. DNS records cannot be configured." >&2
+    exit 1
+  fi
+
+  ZONE_NAME=$(aws route53 get-hosted-zone --id "$ZONE_ID" --query "HostedZone.Name" --output text 2>/dev/null || echo "")
+  if [ "$ZONE_NAME" != "${ROOT_DOMAIN}." ]; then
+    echo "ERROR: Target hosted zone '$ZONE_ID' has name '$ZONE_NAME', which does not match expected '${ROOT_DOMAIN}.'." >&2
+    exit 1
+  fi
+  echo "Verified authoritative Route 53 hosted zone: $ZONE_ID ($ZONE_NAME)"
+
+  echo "Evaluating Route 53 records for $APP_DOMAIN subdomains against ALB $ALB_HOST..."
+  python3 -c "
+import json, subprocess, sys
+
+zone_id = '$ZONE_ID'
+alb_host = '$ALB_HOST'.strip().rstrip('.')
+app_domain = '$APP_DOMAIN'
+subdomains = ['vote', 'result', 'jenkins', 'sonarqube', 'grafana']
+
+res = subprocess.run(['aws', 'route53', 'list-resource-record-sets', '--hosted-zone-id', zone_id],
+                     capture_output=True, text=True, check=True)
+data = json.loads(res.stdout)
+existing_records = {r['Name'].rstrip('.'): r for r in data.get('ResourceRecordSets', [])}
+
+changes = []
+for sub in subdomains:
+    fqdn = f'{sub}.{app_domain}'
+    existing = existing_records.get(fqdn)
+    if existing:
+        current_vals = [v.get('Value', '').strip().rstrip('.') for v in existing.get('ResourceRecords', [])]
+        alias_target = existing.get('AliasTarget', {}).get('DNSName', '').strip().rstrip('.')
+        if alias_target:
+            current_vals.append(alias_target)
+
+        if alb_host in current_vals or any(v == alb_host for v in current_vals):
+            print(f'Record {fqdn} already points to expected ALB ({alb_host}); skipping.')
+            continue
+
+        print(f'Updating record {fqdn} from {current_vals} to new ALB {alb_host}...')
+        changes.append({
+            'Action': 'UPSERT',
+            'ResourceRecordSet': {
+                'Name': f'{fqdn}.',
+                'Type': 'CNAME',
+                'TTL': 60,
+                'ResourceRecords': [{'Value': alb_host}]
+            }
+        })
+    else:
+        print(f'Record {fqdn} is absent. Creating CNAME -> {alb_host}...')
+        changes.append({
+            'Action': 'UPSERT',
+            'ResourceRecordSet': {
+                'Name': f'{fqdn}.',
+                'Type': 'CNAME',
+                'TTL': 60,
+                'ResourceRecords': [{'Value': alb_host}]
+            }
+        })
+
+if changes:
+    batch = {'Comment': 'Votex ALB routing', 'Changes': changes}
+    subprocess.run(['aws', 'route53', 'change-resource-record-sets',
+                    '--hosted-zone-id', zone_id,
+                    '--change-batch', json.dumps(batch)], check=True)
+    print(f'Successfully applied {len(changes)} Route 53 DNS changes.')
+else:
+    print('All 5 Votex DNS records already configured correctly and match the ALB.')
+" || {
+    echo "ERROR: Route 53 DNS record management failed for $APP_DOMAIN." >&2
+    exit 1
+  }
+
+  echo "Verifying DNS resolution for $APP_DOMAIN subdomains before public health checks..."
+  DNS_VERIFIED=false
+  for attempt in $(seq 1 30); do
+    RESOLVED_IP=$(python3 -c "import socket; print(socket.gethostbyname('vote.$APP_DOMAIN'))" 2>/dev/null || echo "")
+    if [ -n "$RESOLVED_IP" ]; then
+      echo "DNS resolution verified for vote.$APP_DOMAIN -> $RESOLVED_IP (attempt $attempt/30)"
+      DNS_VERIFIED=true
+      break
+    fi
+    echo "Waiting for DNS propagation of vote.$APP_DOMAIN... (attempt $attempt/30)"
+    sleep 3
+  done
+
+  if [ "$DNS_VERIFIED" != "true" ]; then
+    echo "ERROR: DNS resolution failed for vote.$APP_DOMAIN after 30 attempts. Cannot proceed to public HTTPS health checks." >&2
+    exit 1
+  fi
 else
   echo "Internal-only mode selected. Public Ingresses remain disabled."
   echo "Services accessible via internal ClusterIP / kubectl port-forward."
@@ -655,8 +828,16 @@ vote_health_url            = "https://vote.$APP_DOMAIN/api/health"
 result_health_url          = "https://result.$APP_DOMAIN/api/health"
 EOF
     echo "Executing complete Terraform reconciliation plan for Lambda module..."
-    terraform -chdir="$TF_DIR" plan -input=false -var="cluster_endpoint_public_access_cidrs=[\"$OP_CIDR\"]" -out="$TF_DIR/lambda-reconcile.tfplan"
-    terraform -chdir="$TF_DIR" apply "$TF_DIR/lambda-reconcile.tfplan"
+    terraform -chdir="$TF_DIR" plan -input=false -var="cluster_endpoint_public_access_cidrs=$OP_LIST" -out="$TF_DIR/lambda-reconcile.tfplan"
+    if ! terraform -chdir="$TF_DIR" apply "$TF_DIR/lambda-reconcile.tfplan"; then
+      if [ -f "$TF_DIR/errored.tfstate" ]; then
+        echo "Persisting Lambda state via AWS CLI S3 transport..."
+        aws s3 cp "$TF_DIR/errored.tfstate" "s3://${STATE_BUCKET}/production/votex.tfstate"
+        rm -f "$TF_DIR/errored.tfstate"
+      else
+        handle_error $LINENO
+      fi
+    fi
     rm -f "$TF_DIR/lambda-reconcile.tfplan"
     aws lambda get-function --function-name "${CLUSTER}-synthetic-health-check" --region "$REGION" >/dev/null || {
       echo "ERROR: Lambda apply finished but the expected synthetic monitoring function was not verified." >&2

@@ -5,6 +5,7 @@
 # Supports both standard full cluster teardown and safe partial-infrastructure recovery.
 
 set -euo pipefail
+export GODEBUG="http2client=0"
 
 RECOVERY_MODE=false
 for arg in "$@"; do

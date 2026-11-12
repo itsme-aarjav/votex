@@ -71,7 +71,13 @@ option_a = os.getenv('OPTION_A', "Cats")
 option_b = os.getenv('OPTION_B', "Dogs")
 hostname = socket.gethostname()
 REDIS_HOST = os.getenv('REDIS_HOST', 'redis')
-REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
+raw_redis_port = os.getenv('REDIS_PORT', '6379')
+if str(raw_redis_port).startswith('tcp://'):
+    raw_redis_port = str(raw_redis_port).split(':')[-1]
+try:
+    REDIS_PORT = int(raw_redis_port)
+except (ValueError, TypeError):
+    REDIS_PORT = 6379
 RESULT_URL = os.getenv('RESULT_URL', '/')
 SECURE_COOKIES = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() in ('true', '1')
 
