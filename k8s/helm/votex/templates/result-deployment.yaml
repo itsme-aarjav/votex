@@ -37,11 +37,13 @@ spec:
         env:
         - name: PORT
           value: {{ .Values.result.service.targetPort | quote }}
+        - name: VOTE_URL
+          value: {{ (default dict .Values.result.env).voteUrl | default "/" | quote }}
         - name: POSTGRES_HOST
           value: "db"
         {{- if .Values.otel.enabled }}
         - name: OTEL_EXPORTER_OTLP_ENDPOINT
-          value: {{ .Values.otel.endpoint | quote }}
+          value: {{ .Values.otel.httpEndpoint | default "http://otel-collector:4318/v1/traces" | quote }}
         - name: OTEL_SERVICE_NAME
           value: "votex-result"
         {{- end }}

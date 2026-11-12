@@ -1,5 +1,5 @@
 # pyrefly: ignore [missing-import]
-from flask import Flask, render_template, request, make_response, g, jsonify
+from flask import Flask, render_template, request, make_response, g, jsonify, Response
 # pyrefly: ignore [missing-import]
 from redis import Redis
 import os
@@ -11,6 +11,7 @@ import datetime
 import uuid
 import re
 import secrets
+import collections
 
 try:
     import bcrypt
@@ -76,6 +77,26 @@ SECURE_COOKIES = os.getenv('SESSION_COOKIE_SECURE', 'false').lower() in ('true',
 
 # In-memory session store used ONLY as fallback during standalone unit testing without Redis
 _TEST_SESSIONS = {}
+
+_metric_requests_total = collections.defaultdict(int)
+_metric_request_duration_sum = collections.defaultdict(float)
+_metric_request_duration_count = collections.defaultdict(int)
+_metric_votes_submitted = collections.defaultdict(int)
+
+@app.before_request
+def _metrics_before_request():
+    request._metrics_start_time = time.time()
+
+@app.after_request
+def _metrics_after_request(response):
+    if request.path != '/metrics':
+        duration = time.time() - getattr(request, '_metrics_start_time', time.time())
+        status = str(response.status_code)
+        method = request.method
+        _metric_requests_total[(method, status)] += 1
+        _metric_request_duration_sum[method] += duration
+        _metric_request_duration_count[method] += 1
+    return response
 
 def get_redis():
     try:
@@ -315,6 +336,7 @@ def index():
         try:
             # Redis Streams with consumer group and persistent durability
             redis.xadd('votes_stream', stream_payload)
+            _metric_votes_submitted[(poll_id, vote)] += 1
         except Exception as ex:
             app.logger.error("Redis enqueue error: %s", ex)
             return jsonify({"status": "error", "message": "Failed to enqueue vote"}), 503
@@ -693,6 +715,50 @@ def health():
         "database": db_status,
         "timestamp": int(time.time())
     }), (200 if overall_status == "healthy" else 503)
+
+@app.route("/metrics", methods=['GET'])
+def prometheus_metrics():
+    lines = [
+        "# HELP votex_http_requests_total Total number of HTTP requests processed by Vote service",
+        "# TYPE votex_http_requests_total counter"
+    ]
+    if _metric_requests_total:
+        for (m, s), count in sorted(_metric_requests_total.items()):
+            lines.append(f'votex_http_requests_total{{service="vote",method="{m}",status="{s}"}} {count}')
+    else:
+        lines.append('votex_http_requests_total{service="vote",method="GET",status="200"} 0')
+
+    lines.extend([
+        "# HELP votex_http_request_duration_seconds HTTP request duration in seconds",
+        "# TYPE votex_http_request_duration_seconds summary"
+    ])
+    if _metric_request_duration_count:
+        for m in sorted(_metric_request_duration_count.keys()):
+            c = _metric_request_duration_count[m]
+            s = _metric_request_duration_sum[m]
+            lines.append(f'votex_http_request_duration_seconds_count{{service="vote",method="{m}"}} {c}')
+            lines.append(f'votex_http_request_duration_seconds_sum{{service="vote",method="{m}"}} {s:.6f}')
+    else:
+        lines.append('votex_http_request_duration_seconds_count{service="vote",method="GET"} 0')
+        lines.append('votex_http_request_duration_seconds_sum{service="vote",method="GET"} 0.000000')
+
+    lines.extend([
+        "# HELP votex_votes_submitted_total Total votes submitted via Vote UI",
+        "# TYPE votex_votes_submitted_total counter"
+    ])
+    if _metric_votes_submitted:
+        for (p, ch), count in sorted(_metric_votes_submitted.items()):
+            lines.append(f'votex_votes_submitted_total{{poll_id="{p}",choice="{ch}"}} {count}')
+    else:
+        lines.append('votex_votes_submitted_total{poll_id="cats-dogs",choice="a"} 0')
+
+    lines.extend([
+        "# HELP votex_service_info Information about the Votex Vote service",
+        "# TYPE votex_service_info gauge",
+        f'votex_service_info{{service="vote",version="2.1.0",hostname="{hostname}"}} 1',
+        ""
+    ])
+    return Response("\n".join(lines), mimetype="text/plain; version=0.0.4; charset=utf-8")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 80))

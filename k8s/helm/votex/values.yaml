@@ -44,6 +44,7 @@ vote:
   env:
     optionA: "Cats"
     optionB: "Dogs"
+    resultUrl: ""
 
 # Result service (Node.js)
 result:
@@ -82,6 +83,8 @@ result:
     minReplicas: 2
     maxReplicas: 8
     targetCPUUtilizationPercentage: 75
+  env:
+    voteUrl: ""
 
 # Worker daemon (Python)
 worker:
@@ -181,6 +184,7 @@ ingress:
 otel:
   enabled: true
   endpoint: "http://otel-collector:4317"
+  httpEndpoint: "http://otel-collector:4318/v1/traces"
   collector:
     image:
       repository: otel/opentelemetry-collector-contrib

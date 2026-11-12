@@ -41,6 +41,8 @@ spec:
           value: {{ .Values.vote.env.optionA | quote }}
         - name: OPTION_B
           value: {{ .Values.vote.env.optionB | quote }}
+        - name: RESULT_URL
+          value: {{ .Values.vote.env.resultUrl | default "/" | quote }}
         - name: POSTGRES_HOST
           value: "db"
         - name: REDIS_HOST

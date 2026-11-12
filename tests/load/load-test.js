@@ -48,7 +48,7 @@ export const options = {
   stages: selectedProfile.stages,
   thresholds: {
     http_req_duration: ['p(95)<1000'],
-    server_failures_5xx: ['count===0'], // Zero 5xx server failures tolerated
+    server_failures_5xx: ['count<1'], // Zero 5xx server failures tolerated
   },
 };
 

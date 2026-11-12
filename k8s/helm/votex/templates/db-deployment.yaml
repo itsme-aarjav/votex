@@ -51,6 +51,10 @@ spec:
         volumeMounts:
         - mountPath: /var/lib/postgresql/data
           name: db-data
+        - mountPath: /docker-entrypoint-initdb.d/init.sql
+          name: db-init
+          subPath: init.sql
+          readOnly: true
       volumes:
       - name: db-data
         {{- if .Values.db.persistence.enabled }}
@@ -59,3 +63,6 @@ spec:
         {{- else }}
         emptyDir: {}
         {{- end }}
+      - name: db-init
+        configMap:
+          name: {{ include "votex.fullname" . }}-db-init

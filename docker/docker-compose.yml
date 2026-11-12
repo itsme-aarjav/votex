@@ -24,10 +24,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    volumes:
-     - ../votex/vote:/usr/local/app
     ports:
-      - "5002:80"
+      - "127.0.0.1:5002:80"
     networks:
       - front-tier
       - back-tier
@@ -49,7 +47,7 @@ services:
     volumes:
       - ../votex/result:/usr/local/app
     ports:
-      - "5001:80"
+      - "127.0.0.1:5001:80"
       - "127.0.0.1:9229:9229"
     networks:
       - front-tier
@@ -78,7 +76,7 @@ services:
     image: redis:alpine
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - "redis-data:/data"
       - "../votex/healthchecks:/healthchecks"
@@ -94,7 +92,7 @@ services:
       POSTGRES_USER: "postgres"
       POSTGRES_PASSWORD: "postgres"
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - "db-data:/var/lib/postgresql/data"
       - "../votex/healthchecks:/healthchecks"

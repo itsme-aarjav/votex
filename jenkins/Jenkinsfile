@@ -179,6 +179,34 @@ spec:
                 script {
                     env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
                     env.IMAGE_TAG = "v2.1.${env.BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
+
+                    if (env.SKIP_CREDENTIAL_CHECK != "true") {
+                        def missingCreds = []
+                        try {
+                            withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'D_U', passwordVariable: 'D_P')]) {
+                                echo "Verified credential: ${env.DOCKER_CRED_ID}"
+                            }
+                        } catch (Exception e) {
+                            missingCreds.add("${env.DOCKER_CRED_ID} (Username/Password for Docker Hub)")
+                        }
+                        try {
+                            withCredentials([file(credentialsId: env.KUBECONFIG_ID, variable: 'K_F')]) {
+                                echo "Verified credential: ${env.KUBECONFIG_ID}"
+                            }
+                        } catch (Exception e) {
+                            missingCreds.add("${env.KUBECONFIG_ID} (Secret file for EKS deployment)")
+                        }
+                        try {
+                            withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SQ_T')]) {
+                                echo "Verified credential: sonarqube-token"
+                            }
+                        } catch (Exception e) {
+                            missingCreds.add("sonarqube-token (Secret text for SonarQube)")
+                        }
+                        if (missingCreds) {
+                            error "PIPELINE ABORTED: Missing required Jenkins credentials: " + missingCreds.join(', ') + ". Add them to Jenkins Credentials before triggering build."
+                        }
+                    }
                 }
                 sh '''
                     echo "Deterministic Release Tag: ${IMAGE_TAG}"
@@ -459,11 +487,30 @@ sys.exit(1)
         stage('6. Trivy Image Scan') {
             steps {
                 container('trivy') {
-                    echo "Scanning container images for vulnerabilities..."
+                    echo "Scanning container images for vulnerabilities (HIGH,CRITICAL policy)..."
                     sh '''
-                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${VOTE_IMAGE}:${IMAGE_TAG}
-                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${RESULT_IMAGE}:${IMAGE_TAG}
-                        trivy image --exit-code 1 --severity CRITICAL --ignore-unfixed ${WORKER_IMAGE}:${IMAGE_TAG}
+                        mkdir -p reports/trivy
+                        trivy image \
+                            --exit-code 1 \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --format table \
+                            --output reports/trivy/image-vote-scan.txt \
+                            ${VOTE_IMAGE}:${IMAGE_TAG}
+                        trivy image \
+                            --exit-code 1 \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --format table \
+                            --output reports/trivy/image-result-scan.txt \
+                            ${RESULT_IMAGE}:${IMAGE_TAG}
+                        trivy image \
+                            --exit-code 1 \
+                            --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --format table \
+                            --output reports/trivy/image-worker-scan.txt \
+                            ${WORKER_IMAGE}:${IMAGE_TAG}
                     '''
                 }
             }

@@ -214,8 +214,8 @@ To avoid the circular dependency where an EKS stack attempts to manage the bucke
 
 ### Operations helpers (`ops/`)
 
-- `bash ops/dashboard.sh`: read-only display of Vote, Result, Jenkins, SonarQube, Grafana and Prometheus service endpoints. It does not validate public TLS or configure DNS.
-- `bash ops/deploy.sh` (default `--offline`): Terraform formatting, backend-disabled initialization and validation only. It does **not** create infrastructure. `--plan` explicitly enables a read-only, AWS-backed speculative plan once the S3 backend has been configured.
+- `bash ops/dashboard.sh`: read-only status and access dashboard for Vote, Result, Jenkins, SonarQube, Grafana, Prometheus, AWS X-Ray, CloudWatch, and Lambda. Handles offline/unreachable cluster gracefully and provides secure credential retrieval instructions.
+- `bash ops/deploy.sh` (default `--offline`): `--offline` performs Terraform formatting, backend-disabled initialization, and validation. `--plan` generates an AWS-backed speculative plan with S3 backend. `--full` performs an approval-gated 23-step platform deployment with strict identity and CIDR preflights.
 - `bash ops/destroy.sh`: **destructive** teardown workflow. Requires the exact `EXPECTED_AWS_ACCOUNT_ID`, EKS and initialized backend checks and two human confirmations. Never run during offline checks.
 
 ## 7. Safe Teardown (`ops/destroy.sh`)
@@ -223,10 +223,10 @@ To avoid the circular dependency where an EKS stack attempts to manage the bucke
 To eliminate lingering AWS costs after live demonstrations, `ops/destroy.sh` executes a strict, ordered decommissioning sequence:
 
 1. **Pre-teardown Diagnostics**: Captures cluster pod logs and configuration to `reports/teardown-<timestamp>/`.
-2. **Ingress Deletion**: Deletes Kubernetes Ingress objects, triggering AWS Load Balancer Controller to deprovision the Application Load Balancer.
-3. **Workload & Helm Uninstallation**: Systematically removes Votex, Prometheus, Loki, Alloy, Jenkins, and SonarQube.
-4. **Storage Volume Release**: Deletes specific Votex PVCs and release-labeled monitoring claims without deleting shared namespaces.
-5. **ELBv2 Verification**: Polls the AWS ELBv2 API (`aws elbv2 describe-load-balancers`) to confirm the ALB is fully deleted before tearing down network subnets.
+2. **Ingress Deletion**: Deletes Kubernetes Ingress objects, allowing the running AWS Load Balancer Controller to reconcile and deprovision the Application Load Balancer.
+3. **ELBv2 Verification (Controller Kept Active)**: Polls the AWS ELBv2 API (`aws elbv2 describe-load-balancers`) to confirm all ALBs tagged `votex-platform` are fully deleted before tearing down the controller.
+4. **Controller & Workload Uninstallation**: Once ALBs are confirmed deleted, uninstalls `aws-load-balancer-controller` in `kube-system`, followed by Votex (`votex`), Prometheus (`monitoring`), Loki (`monitoring`), Alloy (`logging`), and CI/CD resources.
+5. **Storage Volume Release & EBS Detachment**: Deletes specific Votex PVCs and release-labeled monitoring claims, verifying volume detachment before subnet removal.
 6. **Terraform Infrastructure Destruction**: Plans and applies `terraform plan -destroy` after explicit operator confirmation (`confirm-terraform-destroy`).
 7. **S3 State Preservation**: The S3 remote state bucket is strictly preserved to maintain audit trails and configuration state.
 8. **Cloud Audit**: Inspects remaining cloud resources for project-specific leftovers; zero charges must not be assumed from an account-wide listing.
@@ -263,7 +263,7 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
 3. **Terraform Backend Initialization**: Configure `terraform/backend.tf` with the provisioned bucket and initialize with `terraform init -backend-config="bucket=votex-tfstate-<ACCOUNT_ID>-eu-north-1"`.
 4. **EKS Provisioning**: Copy `terraform/terraform.tfvars.example` to an ignored `terraform.tfvars`, set your actual approved operator public CIDR in `cluster_endpoint_public_access_cidrs`, and review a full Terraform plan before an approved apply. Exactly 2 × `m7i-flex.large` nodes.
 5. **EBS CSI & Storage Setup**: Connect `kubectl` (`aws eks update-kubeconfig --region eu-north-1 --name votex-cluster`) and run `bash terraform/scripts/post_apply.sh` to initialize gp3 storage and verify IRSA roles.
-6. **AWS Load Balancer Controller**: Deploy AWS Load Balancer Controller with its dedicated IAM Role for Service Accounts (IRSA) to manage shared ALB ingress.
+6. **AWS Load Balancer Controller**: Deploy AWS Load Balancer Controller with its dedicated IAM Role for Service Accounts (IRSA, output as `aws_lb_controller_role_arn`) to manage shared ALB ingress in `kube-system`.
 
 ### Phase B: Workload & Observability Deployment
 7. **Application Deployment**: Deploy Votex core services:
@@ -298,9 +298,9 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
      --namespace monitoring
    helm upgrade --install alloy grafana/alloy \
      -f ./k8s/monitoring/values-alloy.yaml \
-     --namespace monitoring
+     --namespace logging
    ```
-9. **Jenkins & SonarQube Deployment**: Deploy CI/CD controllers into their isolated namespaces:
+9. **Jenkins & SonarQube Deployment**: Deploy CI/CD controllers into their isolated namespaces. Jenkins is provisioned via JCasC with Job DSL to automatically create `votex-pipeline` tracking `main`, and an admin password retrieved from the `jenkins-admin-credentials` Kubernetes secret. SonarQube is configured with an internal Quality Gate callback webhook to `http://jenkins.jenkins.svc.cluster.local:8080/sonarqube-webhook/`:
    ```bash
    kubectl apply -f jenkins/jenkins.yaml
    kubectl apply -f sonarqube/sonarqube.yaml
@@ -337,7 +337,10 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
      --namespace votex --rollback-on-failure
    ```
    Replace placeholder hostnames in Jenkins/SonarQube/Grafana manifests with owned DNS names and validate authentication/access controls before public exposure. Do not deploy placeholder ACM ARNs or domains.
-11. **Credentials & Authentication**: Store Jenkins credentials (`dockerhub-credentials`, `k8s-kubeconfig`, `sonarqube-token`) in the Jenkins credential store.
+11. **Credentials & Authentication**: Retrieve the generated Jenkins administrator password via `kubectl get secret jenkins-admin-credentials -n jenkins -o jsonpath='{.data.jenkins-admin-password}' | base64 -d`. Store required agent credentials:
+    - `dockerhub-credentials`: Username & Password for Docker Hub candidate publishing.
+    - `k8s-kubeconfig`: Secret file containing cluster kubeconfig for Helm continuous delivery.
+    - `sonarqube-token`: Secret text analysis token for SonarQube SAST and Quality Gate callback.
 12. **Jenkins 9-Stage Pipeline Execution**: Trigger declarative pipeline on `main`. Executes all 9 stages: Checkout, Build & Smoke Validation, SonarQube SAST, Trivy Filesystem, Docker Build, Trivy Image, OWASP ZAP DAST, Docker Hub Publish, and EKS Deploy & Verification.
 
 ### Phase D: Operational Verification & Evidence
@@ -350,7 +353,7 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
     ```bash
     AWS_ACCOUNT_ID="<YOUR_ACCOUNT_ID>" bash tests/resilience/chaos-test.sh --confirm
     ```
-15. **Lambda Alarms Verification**: After configuring real HTTPS health URLs, set `enable_health_check_lambda=true`, `vote_health_url` and `result_health_url`; review a full Terraform plan and separately authorize apply. The correct module is `module.lambda`. Verify EventBridge and CloudWatch alarms live.
+15. **Lambda Alarms Verification**: After configuring real HTTPS health URLs, enable external synthetic monitoring via persistent configuration and reconciliation (`terraform/lambda.auto.tfvars` with full plan and apply). The module `module.lambda` is reconciled without state drift. Verify EventBridge and CloudWatch alarms live.
 16. **Ansible Disaster Recovery Verification**: Execute automated logical database backup and isolated restore verification:
     ```bash
     ansible-playbook -i ansible/inventory/hosts.ini.example ansible/backup_restore_verify.yml
@@ -401,7 +404,7 @@ The platform enforces strict container security standards while transparently ad
 | **PostgreSQL Backup & Restore** | Implemented (`ansible/`) | `ansible-playbook --syntax-check` validated | Active PostgreSQL pod in `votex` namespace | Offline Validated |
 | **Resilience & Chaos Testing** | Implemented (`tests/resilience/`) | `bash -n` syntax checked, safety flags enforced | Running cluster with replica deployments | Offline Validated |
 | **Load Testing (k6)** | Implemented (`tests/load/`) | `node --check` syntax checked, custom metrics valid | Live ALB URL with ingress routing | Offline Validated |
-| **AWS Lambda Synthetic Canary** | Implemented (`terraform/modules/lambda_monitoring`) | Pytest syntax & handler invocation verified | Live public URL, EventBridge rule, CloudWatch alarm | Offline Validated |
+| **AWS Lambda Synthetic Canary** | Implemented (`terraform/modules/lambda/`, `lambda/health_check/handler.py`) | Pytest syntax & handler invocation verified | Live public URL, EventBridge rule, CloudWatch alarm | Offline Validated |
 | **Automated Teardown Script** | Implemented (`ops/destroy.sh`) | `bash -n` syntax checked, safety checks verified | Live cluster resources to query and delete | Offline Validated |
 
 ---

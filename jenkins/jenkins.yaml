@@ -93,6 +93,66 @@ spec:
     requests:
       storage: 5Gi
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: jenkins-casc
+  namespace: jenkins
+data:
+  jenkins.yaml: |
+    jenkins:
+      systemMessage: "Votex Platform Automated CI/CD Controller"
+      numExecutors: 0
+      mode: EXCLUSIVE
+      scmCheckoutRetryCount: 3
+      clouds:
+        - kubernetes:
+            name: "kubernetes"
+            serverUrl: "https://kubernetes.default.svc.cluster.local"
+            namespace: "jenkins"
+            jenkinsUrl: "http://jenkins.jenkins.svc.cluster.local:8080"
+            jenkinsTunnel: "jenkins.jenkins.svc.cluster.local:50000"
+            containerCapStr: "10"
+            retentionTimeout: 10
+            connectTimeout: 100
+      securityRealm:
+        local:
+          allowsSignup: false
+          users:
+            - id: "admin"
+              name: "Administrator"
+              password: "${JENKINS_ADMIN_PASSWORD}"
+      authorizationStrategy:
+        loggedInUsersCanDoAnything:
+          allowAnonymousRead: false
+    jobs:
+      - script: >
+          pipelineJob('votex-pipeline') {
+            description('Votex 9-stage DevSecOps Delivery Pipeline')
+            definition {
+              cpsScm {
+                scm {
+                  git {
+                    remote {
+                      url('https://github.com/itsme-aarjav/votex.git')
+                    }
+                    branch('*/main')
+                  }
+                }
+                scriptPath('jenkins/Jenkinsfile')
+                lightweight(true)
+              }
+            }
+          }
+    unclassified:
+      sonarGlobalConfiguration:
+        buildWrapperEnabled: false
+        installations:
+          - name: "SonarQube"
+            serverUrl: "http://sonarqube.sonarqube.svc.cluster.local:9000"
+            credentialsId: "sonarqube-token"
+            additionalAnalysisProperties: "sonar.language=python,js"
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -114,6 +174,27 @@ spec:
       securityContext:
         fsGroup: 1000
         runAsUser: 1000
+      initContainers:
+      - name: install-plugins
+        image: jenkins/jenkins:lts-jdk17
+        command:
+        - /bin/sh
+        - -c
+        - |
+          jenkins-plugin-cli --plugins \
+            configuration-as-code \
+            kubernetes \
+            sonar \
+            git \
+            workflow-aggregator \
+            credentials-binding \
+            pipeline-stage-view \
+            ws-cleanup \
+            job-dsl \
+            --plugin-download-directory /var/jenkins_home/plugins
+        volumeMounts:
+        - name: jenkins-home
+          mountPath: /var/jenkins_home
       containers:
       - name: jenkins
         image: jenkins/jenkins:lts-jdk17
@@ -123,6 +204,16 @@ spec:
           name: http
         - containerPort: 50000
           name: agent
+        env:
+        - name: CASC_JENKINS_CONFIG
+          value: /var/jenkins_home/casc_configs/jenkins.yaml
+        - name: JAVA_OPTS
+          value: "-Djenkins.install.runSetupWizard=false"
+        - name: JENKINS_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: jenkins-admin-credentials
+              key: jenkins-admin-password
         resources:
           requests:
             cpu: 300m
@@ -133,10 +224,15 @@ spec:
         volumeMounts:
         - name: jenkins-home
           mountPath: /var/jenkins_home
+        - name: casc-config
+          mountPath: /var/jenkins_home/casc_configs
       volumes:
       - name: jenkins-home
         persistentVolumeClaim:
           claimName: jenkins-pvc
+      - name: casc-config
+        configMap:
+          name: jenkins-casc
 ---
 apiVersion: v1
 kind: Service
@@ -156,29 +252,3 @@ spec:
     name: agent
   selector:
     app: jenkins
----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: jenkins-ingress
-  namespace: jenkins
-  annotations:
-    alb.ingress.kubernetes.io/group.name: "votex-platform"
-    alb.ingress.kubernetes.io/group.order: "30"
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-spec:
-  ingressClassName: alb
-  rules:
-  - host: jenkins.votex.domain.tld
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: jenkins
-            port:
-              number: 8080

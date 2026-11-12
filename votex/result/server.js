@@ -11,9 +11,27 @@ var otelEnabled = (process.env.OTEL_ENABLED || 'true').toLowerCase() === 'true';
 var tracer = null;
 var otelContext = null;
 var otelPropagation = null;
+var tracerProvider = null;
 if (otelEnabled) {
   try {
     var otelApi = require('@opentelemetry/api');
+    try {
+      var { BasicTracerProvider, BatchSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+      var { OTLPTraceExporter } = require('@opentelemetry/exporter-trace-otlp-http');
+      var { Resource } = require('@opentelemetry/resources');
+
+      var resource = new Resource({
+        'service.name': 'votex-result',
+        'service.version': '2.1.0'
+      });
+      tracerProvider = new BasicTracerProvider({ resource: resource });
+      var endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT || 'http://otel-collector:4318/v1/traces';
+      var exporter = new OTLPTraceExporter({ url: endpoint });
+      tracerProvider.addSpanProcessor(new BatchSpanProcessor(exporter));
+      tracerProvider.register();
+    } catch (_sdkErr) {
+      // SDK not installed or core API fallback
+    }
     tracer = otelApi.trace.getTracer('votex-result', '2.1.0');
     otelContext = otelApi.context;
     otelPropagation = otelApi.propagation;
@@ -24,7 +42,20 @@ if (otelEnabled) {
   }
 }
 
+var metricRequestsTotal = 0;
+var metricErrorsTotal = 0;
+var metricDbQueriesTotal = 0;
+var metricSocketConnections = 0;
+
 app.use(function (req, res, next) {
+  if (req.path !== '/metrics') {
+    metricRequestsTotal++;
+    res.on('finish', function () {
+      if (res.statusCode >= 400) {
+        metricErrorsTotal++;
+      }
+    });
+  }
   if (tracer) {
     var parentCtx = (otelPropagation && otelContext)
       ? otelPropagation.extract(otelContext.active(), req.headers)
@@ -59,8 +90,19 @@ var pool = new Pool(dbUrl ? { connectionString: dbUrl } : {
   connectionTimeoutMillis: 5000
 });
 
+var origPoolQuery = pool.query.bind(pool);
+pool.query = function (...args) {
+  metricDbQueriesTotal++;
+  return origPoolQuery(...args);
+};
+
 io.on('connection', function (socket) {
+  metricSocketConnections++;
   socket.emit('message', { text: 'Welcome!' });
+
+  socket.on('disconnect', function () {
+    metricSocketConnections = Math.max(0, metricSocketConnections - 1);
+  });
 
   socket.on('subscribe', function (data) {
     if (data && data.channel) {
@@ -244,6 +286,29 @@ app.get('/api/config', function (req, res) {
     vote_url: voteUrl,
     port: port
   });
+});
+
+app.get('/metrics', function (req, res) {
+  var metrics = [
+    '# HELP votex_result_http_requests_total Total HTTP requests received by Result service',
+    '# TYPE votex_result_http_requests_total counter',
+    'votex_result_http_requests_total ' + metricRequestsTotal,
+    '# HELP votex_result_http_errors_total Total HTTP error responses (4xx/5xx)',
+    '# TYPE votex_result_http_errors_total counter',
+    'votex_result_http_errors_total ' + metricErrorsTotal,
+    '# HELP votex_result_db_queries_total Total PostgreSQL queries executed',
+    '# TYPE votex_result_db_queries_total counter',
+    'votex_result_db_queries_total ' + metricDbQueriesTotal,
+    '# HELP votex_result_ws_connections_current Current connected WebSocket clients',
+    '# TYPE votex_result_ws_connections_current gauge',
+    'votex_result_ws_connections_current ' + metricSocketConnections,
+    '# HELP votex_service_info Information about the Votex Result service',
+    '# TYPE votex_service_info gauge',
+    'votex_service_info{service="result",version="2.1.0"} 1',
+    ''
+  ].join('\n');
+  res.set('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(metrics);
 });
 
 app.get('/', function (req, res) {
