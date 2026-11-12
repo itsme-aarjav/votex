@@ -115,19 +115,23 @@ resource "aws_lambda_permission" "allow_eventbridge" {
   source_arn    = aws_cloudwatch_event_rule.schedule[0].arn
 }
 
-# CloudWatch Alarm for Service Outages
-resource "aws_cloudwatch_metric_alarm" "health_alarm" {
+# CloudWatch Alarm for Overall Synthetic Health Outages
+resource "aws_cloudwatch_metric_alarm" "overall_health_alarm" {
   count               = var.enabled ? 1 : 0
-  alarm_name          = "${var.cluster_name}-synthetic-health-failure"
+  alarm_name          = "${var.cluster_name}-overall-health-failure"
   comparison_operator = "LessThanThreshold"
   evaluation_periods  = 2
-  metric_name         = "HealthCheckStatus"
+  metric_name         = "OverallHealthStatus"
   namespace           = "Votex/SyntheticMonitoring"
   period              = 300
   statistic           = "Minimum"
   threshold           = 1
   treat_missing_data  = "breaching"
-  alarm_description   = "Triggers when any Votex service synthetic health check reports DOWN or fails to emit"
+  alarm_description   = "Triggers when overall Votex synthetic health check reports DOWN or fails"
+
+  dimensions = {
+    Environment = var.environment
+  }
 
   tags = {
     Environment = var.environment
@@ -136,3 +140,28 @@ resource "aws_cloudwatch_metric_alarm" "health_alarm" {
   }
 }
 
+# CloudWatch Alarms for Service-Level Synthetic Health
+resource "aws_cloudwatch_metric_alarm" "service_health_alarm" {
+  for_each            = var.enabled ? toset(["vote", "result"]) : toset([])
+  alarm_name          = "${var.cluster_name}-${each.key}-health-failure"
+  comparison_operator = "LessThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "HealthCheckStatus"
+  namespace           = "Votex/SyntheticMonitoring"
+  period              = 300
+  statistic           = "Minimum"
+  threshold           = 1
+  treat_missing_data  = "breaching"
+  alarm_description   = "Triggers when ${each.key} service synthetic health check reports DOWN or fails"
+
+  dimensions = {
+    Service     = each.key
+    Environment = var.environment
+  }
+
+  tags = {
+    Environment = var.environment
+    ManagedBy   = "Terraform"
+    Project     = "Votex"
+  }
+}

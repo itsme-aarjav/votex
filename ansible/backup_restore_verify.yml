@@ -1,0 +1,231 @@
+---
+# Votex Automated Database Backup & Non-Destructive Restore Verification
+# Primary Ansible responsibility: Verifies PostgreSQL disaster recovery readiness.
+# Restores into an isolated temporary database to prevent touching live production data.
+
+- name: PostgreSQL Disaster Recovery & Logical Backup Verification
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars:
+    target_namespace: "{{ k8s_namespace | default('votex') }}"
+    db_pod_selector: "app=db"
+    db_name: "{{ target_db | default('postgres') }}"
+    db_user: "{{ target_user | default('postgres') }}"
+    backup_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+    verify_db_name: "votex_verify_{{ backup_timestamp }}"
+    remote_backup_path: "/tmp/votex_backup_{{ backup_timestamp }}.dump"
+    local_backup_path: "/tmp/votex_backup_{{ backup_timestamp }}.dump"
+    s3_backup_bucket: "{{ backup_s3_bucket | default('') }}"
+    temp_db_created: false
+
+  tasks:
+    - name: Disaster Recovery Verification Workflow
+      block:
+        - name: "Preflight safety check: prevent using Terraform state bucket for database backups"
+          ansible.builtin.assert:
+            that:
+              - "'tfstate' not in s3_backup_bucket"
+            fail_msg: "CRITICAL SAFETY: S3 database backup bucket must not be the Terraform state bucket."
+          when: s3_backup_bucket | length > 0
+
+        - name: 1. Verify cluster connectivity and context
+          ansible.builtin.command: kubectl cluster-info
+          register: cluster_check
+          changed_when: false
+          failed_when: cluster_check.rc != 0
+
+        - name: 2. Locate PostgreSQL Pod in target namespace
+          ansible.builtin.command: >
+            kubectl get pods -n {{ target_namespace }}
+            -l {{ db_pod_selector }}
+            -o jsonpath='{.items[0].metadata.name}'
+          register: db_pod_query
+          changed_when: false
+          failed_when: db_pod_query.stdout == "" or db_pod_query.rc != 0
+
+        - name: Set DB Pod Name
+          ansible.builtin.set_fact:
+            db_pod: "{{ db_pod_query.stdout }}"
+
+        - name: Verify PostgreSQL Pod phase is Running
+          ansible.builtin.command: >
+            kubectl get pod {{ db_pod }} -n {{ target_namespace }}
+            -o jsonpath='{.status.phase}'
+          register: db_pod_phase
+          changed_when: false
+          failed_when: db_pod_phase.stdout != "Running"
+
+        - name: 3. Verify PostgreSQL service readiness
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            pg_isready -U {{ db_user }} -d {{ db_name }}
+          register: db_ready
+          changed_when: false
+          failed_when: db_ready.rc != 0
+
+        - name: 4. Query source database row count (strict failure enforcement)
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            psql -U {{ db_user }} -d {{ db_name }} -t -A -c
+            "SELECT COUNT(*) FROM votes;"
+          register: source_vote_count
+          changed_when: false
+          failed_when: source_vote_count.rc != 0
+
+        - name: 5. Perform logical database backup via pg_dump
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            pg_dump -U {{ db_user }} -d {{ db_name }} -Fc -f {{ remote_backup_path }}
+          register: pg_dump_result
+          changed_when: true
+          failed_when: pg_dump_result.rc != 0
+
+        - name: 6. Verify backup file existence and non-zero size
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            stat -c %s {{ remote_backup_path }}
+          register: backup_size
+          changed_when: false
+          failed_when: backup_size.rc != 0 or (backup_size.stdout | int) <= 0
+
+        - name: Verify backup archive header and table catalog integrity
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            pg_restore --list {{ remote_backup_path }}
+          register: backup_catalog
+          changed_when: false
+          failed_when: backup_catalog.rc != 0 or 'votes' not in backup_catalog.stdout
+
+        - name: Record backup metadata
+          ansible.builtin.debug:
+            msg: "Backup generated and validated: {{ remote_backup_path }} (Size: {{ backup_size.stdout }} bytes)"
+
+        - name: 7. Copy backup dump to local runner for S3 upload
+          ansible.builtin.command: >
+            kubectl cp -n {{ target_namespace }} {{ db_pod }}:{{ remote_backup_path }} {{ local_backup_path }}
+          when: s3_backup_bucket | length > 0
+          changed_when: true
+
+        - name: 8. Archive backup to durable S3 storage
+          ansible.builtin.command: >
+            aws s3 cp {{ local_backup_path }}
+            s3://{{ s3_backup_bucket }}/backups/{{ backup_timestamp }}/votex_backup.dump
+            --sse AES256
+          when: s3_backup_bucket | length > 0
+          changed_when: true
+
+        - name: Verify S3 uploaded backup object exists
+          ansible.builtin.command: >
+            aws s3api head-object
+            --bucket {{ s3_backup_bucket }}
+            --key backups/{{ backup_timestamp }}/votex_backup.dump
+          when: s3_backup_bucket | length > 0
+          changed_when: false
+
+        - name: Informative Notice if S3 durable archiving is not configured
+          ansible.builtin.debug:
+            msg: "S3 backup bucket not specified. Disaster recovery verification executed in temporary/local-only mode."
+          when: s3_backup_bucket | length == 0
+
+        - name: 9. Create isolated temporary database for non-destructive restore verification
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            createdb -U {{ db_user }} {{ verify_db_name }}
+          register: create_temp_db
+          changed_when: true
+          failed_when: create_temp_db.rc != 0
+
+        - name: Track temp DB creation
+          ansible.builtin.set_fact:
+            temp_db_created: true
+
+        - name: 10. Restore backup dump into isolated temporary database (strict rc=0)
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            pg_restore -U {{ db_user }} -d {{ verify_db_name }} --no-owner --no-privileges {{ remote_backup_path }}
+          register: restore_result
+          changed_when: true
+          failed_when: restore_result.rc != 0
+
+        - name: 11. Verify restored schema and tables in temporary database
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            psql -U {{ db_user }} -d {{ verify_db_name }} -t -A -c
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='public';"
+          register: restored_tables
+          changed_when: false
+          failed_when: restored_tables.rc != 0
+
+        - name: 12. Check table row count in restored temporary database
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            psql -U {{ db_user }} -d {{ verify_db_name }} -t -A -c
+            "SELECT COUNT(*) FROM votes;"
+          register: restored_vote_count
+          changed_when: false
+          failed_when: restored_vote_count.rc != 0
+
+        - name: 13. Assert restored database schema and row count match source
+          ansible.builtin.assert:
+            that:
+              - "'votes' in restored_tables.stdout"
+              - "restored_vote_count.stdout == source_vote_count.stdout"
+            fail_msg: "Recovery verification failed: schema or row count mismatch between source and restored database."
+            success_msg: "Recovery verification passed: 'votes' schema and row count ({{ restored_vote_count.stdout }}) match source."
+
+        - name: 14. Backup & Recovery Verification Summary
+          ansible.builtin.debug:
+            msg:
+              - "POSTGRESQL DISASTER RECOVERY VERIFICATION: SUCCESS"
+              - "Namespace: {{ target_namespace }}"
+              - "Pod: {{ db_pod }}"
+              - "Verified Backup Size: {{ backup_size.stdout }} bytes"
+              - "Source Vote Rows: {{ source_vote_count.stdout }}"
+              - "Restored Vote Rows: {{ restored_vote_count.stdout }}"
+              - "Schema Integrity: VERIFIED"
+              - "Production Database State: UNTOUCHED & SAFE"
+
+      always:
+        - name: Always clean up temporary verification database
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            dropdb -U {{ db_user }} --if-exists {{ verify_db_name }}
+          when: db_pod is defined and temp_db_created | bool
+          register: dropdb_result
+          changed_when: true
+          failed_when: dropdb_result.rc != 0
+
+        - name: Verify temporary database cleanup
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            psql -U {{ db_user }} -t -A -c
+            "SELECT 1 FROM pg_database WHERE datname='{{ verify_db_name }}';"
+          when: db_pod is defined and temp_db_created | bool
+          register: cleanup_db_check
+          changed_when: false
+          failed_when: cleanup_db_check.rc != 0 or cleanup_db_check.stdout != ""
+
+        - name: Always clean up temporary remote backup file
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            rm -f {{ remote_backup_path }}
+          when: db_pod is defined
+          register: remote_rm_result
+          changed_when: true
+          failed_when: remote_rm_result.rc != 0
+
+        - name: Verify remote backup file deletion
+          ansible.builtin.command: >
+            kubectl exec -n {{ target_namespace }} {{ db_pod }} --
+            test ! -f {{ remote_backup_path }}
+          when: db_pod is defined
+          register: remote_file_check
+          changed_when: false
+          failed_when: remote_file_check.rc != 0
+
+        - name: Always clean up temporary local backup file
+          ansible.builtin.file:
+            path: "{{ local_backup_path }}"
+            state: absent

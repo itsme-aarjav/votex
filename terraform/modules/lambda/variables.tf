@@ -1,5 +1,5 @@
 variable "enabled" {
-  description = "Whether to provision the Lambda synthetic health check infrastructure (opt-in disabled by default)"
+  description = "Whether to provision the Lambda synthetic health check infrastructure (disabled by default until live HTTPS endpoints exist)"
   type        = bool
   default     = false
 }
@@ -7,7 +7,7 @@ variable "enabled" {
 variable "environment" {
   description = "Deployment environment name"
   type        = string
-  default     = "dev"
+  default     = "production"
 }
 
 variable "cluster_name" {
@@ -17,19 +17,19 @@ variable "cluster_name" {
 }
 
 variable "vote_health_url" {
-  description = "Target URL for the Vote service health endpoint"
+  description = "External public HTTPS URL for Vote service health endpoint (e.g. https://<domain>/api/health)"
   type        = string
-  default     = "http://vote.votex.svc.cluster.local/api/health"
+  default     = ""
 }
 
 variable "result_health_url" {
-  description = "Target URL for the Result service health endpoint"
+  description = "External public HTTPS URL for Result service health endpoint (e.g. https://<domain>/api/health)"
   type        = string
-  default     = "http://result.votex.svc.cluster.local/api/health"
+  default     = ""
 }
 
 variable "schedule_expression" {
-  description = "EventBridge cron or rate expression for invocation schedule"
+  description = "EventBridge cron or rate expression for invocation schedule (default: every 5 minutes)"
   type        = string
   default     = "rate(5 minutes)"
 }
@@ -39,4 +39,3 @@ variable "timeout" {
   type        = number
   default     = 15
 }
-

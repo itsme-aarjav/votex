@@ -695,4 +695,5 @@ def health():
     }), (200 if overall_status == "healthy" else 503)
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=80, debug=True, threaded=True)
+    port = int(os.getenv("PORT", 80))
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

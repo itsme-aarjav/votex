@@ -3,6 +3,19 @@ kind: Namespace
 metadata:
   name: sonarqube
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-data-pvc
+  namespace: sonarqube
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: gp3
+  resources:
+    requests:
+      storage: 5Gi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -49,7 +62,7 @@ spec:
         - name: SONAR_ES_BOOTSTRAP_CHECKS_DISABLE
           value: "true"
         - name: SONAR_FORCEAUTHENTICATION
-          value: "false"
+          value: "true"
         - name: SONAR_SEARCH_JAVAADDITIONALOPTS
           value: "-Xmx256m -Xms256m"
         - name: SONAR_WEB_JAVAADDITIONALOPTS
@@ -63,6 +76,13 @@ spec:
           limits:
             memory: "2000Mi"
             cpu: "1000m"
+        volumeMounts:
+        - name: sonarqube-data
+          mountPath: /opt/sonarqube/data
+      volumes:
+      - name: sonarqube-data
+        persistentVolumeClaim:
+          claimName: sonarqube-data-pvc
 ---
 apiVersion: v1
 kind: Service
@@ -71,13 +91,37 @@ metadata:
   namespace: sonarqube
   labels:
     app: sonarqube
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-internal: "true"
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   ports:
   - port: 9000
     targetPort: 9000
     name: http
   selector:
     app: sonarqube
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sonarqube-ingress
+  namespace: sonarqube
+  annotations:
+    alb.ingress.kubernetes.io/group.name: "votex-platform"
+    alb.ingress.kubernetes.io/group.order: "40"
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: "443"
+spec:
+  ingressClassName: alb
+  rules:
+  - host: sonarqube.votex.domain.tld
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: sonarqube
+            port:
+              number: 9000

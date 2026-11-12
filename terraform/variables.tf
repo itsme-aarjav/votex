@@ -5,9 +5,9 @@ variable "aws_region" {
 }
 
 variable "environment" {
-  description = "Environment name (e.g. dev, staging, prod)"
+  description = "Environment name (single production environment)"
   type        = string
-  default     = "dev"
+  default     = "production"
 }
 
 variable "cluster_name" {
@@ -71,19 +71,24 @@ variable "enable_health_check_lambda" {
 }
 
 variable "vote_health_url" {
-  description = "Public or ingress URL for the Vote service health endpoint"
+  description = "External public HTTPS URL for Vote service synthetic health check (configured upon live domain provisioning)"
   type        = string
-  default     = "http://vote.votex.svc.cluster.local/api/health"
+  default     = ""
 }
 
 variable "result_health_url" {
-  description = "Public or ingress URL for the Result service health endpoint"
+  description = "External public HTTPS URL for Result service synthetic health check (configured upon live domain provisioning)"
   type        = string
-  default     = "http://result.votex.svc.cluster.local/api/health"
+  default     = ""
 }
 
 variable "cluster_endpoint_public_access_cidrs" {
-  description = "List of approved CIDR blocks permitted to communicate with the EKS public API endpoint. Avoids unrestricted 0.0.0.0/0 exposure."
+  description = "List of approved CIDR blocks permitted to communicate with the EKS public API endpoint (e.g. operator workstation public IP '/32'). Avoids unrestricted 0.0.0.0/0 exposure."
   type        = list(string)
   default     = ["10.0.0.0/16"]
+
+  validation {
+    condition     = length(var.cluster_endpoint_public_access_cidrs) > 0 && !contains(var.cluster_endpoint_public_access_cidrs, "0.0.0.0/0")
+    error_message = "The EKS public API endpoint must be restricted to approved operator CIDRs (e.g. ['<OPERATOR_IP>/32']). Unrestricted exposure ('0.0.0.0/0') is prohibited."
+  }
 }

@@ -12,7 +12,7 @@ spec:
   - name: VotexApplicationAlerts
     rules:
     - alert: VotexPodCrashLooping
-      expr: rate(kube_pod_container_status_restarts_total{namespace="votex", container=~"vote|result|worker|postgres|redis"}[5m]) * 60 > 2
+      expr: rate(kube_pod_container_status_restarts_total{namespace="votex", container=~"vote|result|worker|db|postgres|redis"}[5m]) * 60 > 2
       for: 2m
       labels:
         severity: critical

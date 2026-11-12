@@ -44,7 +44,6 @@ reports/
 .venv/
 *.zip
 
-# Local-only test suites (preserved locally on workstation, untracked in Git)
-tests/
+# Local-only application test suites (preserved locally on workstation, untracked in Git)
 votex/tests/
 votex/result/tests/

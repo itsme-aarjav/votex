@@ -165,10 +165,14 @@ ingress:
   enabled: false
   className: alb
   annotations:
+    alb.ingress.kubernetes.io/group.name: "votex-platform"
+    alb.ingress.kubernetes.io/group.order: "10"
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
     alb.ingress.kubernetes.io/ssl-redirect: "443"
+    kubernetes.io/ingress.class: null
+    nginx.ingress.kubernetes.io/proxy-body-size: null
     # alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:eu-north-1:123456789012:certificate/example"
   hosts:
     - host: vote.votex.domain.tld

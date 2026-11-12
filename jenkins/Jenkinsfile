@@ -131,7 +131,7 @@ spec:
           cpu: 500m
           memory: 512Mi
     - name: deploy
-      image: alpine/k8s:1.31.1
+      image: alpine/k8s:1.36.6
       command: ["sleep"]
       args: ["99d"]
       resources:
@@ -162,7 +162,6 @@ spec:
         VOTE_IMAGE        = "${DOCKER_USER}/votex-vote"
         RESULT_IMAGE      = "${DOCKER_USER}/votex-result"
         WORKER_IMAGE      = "${DOCKER_USER}/votex-worker"
-        SEED_IMAGE        = "${DOCKER_USER}/votex-seed"
     }
 
     options {
@@ -177,8 +176,12 @@ spec:
             steps {
                 echo "Checking out source code repository..."
                 checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
+                    env.IMAGE_TAG = "v2.1.${env.BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
+                }
                 sh '''
-                    echo "Release Candidate Tag: ${IMAGE_TAG}"
+                    echo "Deterministic Release Tag: ${IMAGE_TAG}"
                     git log -1 --stat
                     mkdir -p reports/zap reports/trivy reports/tests
                 '''
@@ -190,25 +193,58 @@ spec:
                 stage('Validate: Vote Service (Python)') {
                     steps {
                         container('python') {
-                            echo "Validating Vote service syntax, dependencies, and startup..."
+                            echo "Validating Vote service syntax, dependencies, and health check..."
                             sh '''
-                                python3 -m pip install --upgrade pip -r votex/vote/requirements.txt
+                                python3 -m pip install --no-cache-dir -r votex/vote/requirements.txt
                                 python3 -m py_compile votex/vote/app.py votex/vote/db.py
-                                python3 -c "import flask, psycopg2, redis, bcrypt; print('Vote dependencies verified')"
 
-                                PORT=5000 python3 votex/vote/app.py > /tmp/vote-smoke.log 2>&1 &
+                                # Establish Redis and PostgreSQL readiness before launch
+                                python3 -c "
+import time, redis, psycopg2, sys
+for _ in range(30):
+    try:
+        r = redis.Redis(host='127.0.0.1', port=6379, socket_timeout=2)
+        r.ping()
+        c = psycopg2.connect(host='127.0.0.1', port=5432, user='postgres', password='postgres', dbname='postgres', connect_timeout=2)
+        c.close()
+        print('Prerequisites verified: Redis and PostgreSQL are ready for Vote service.')
+        sys.exit(0)
+    except Exception:
+        time.sleep(1)
+print('ERROR: Timeout waiting for Redis/Postgres readiness')
+sys.exit(1)
+"
+
+                                REDIS_HOST=127.0.0.1 POSTGRES_HOST=127.0.0.1 POSTGRES_PASSWORD=postgres PORT=5000 python3 votex/vote/app.py > /tmp/vote-smoke.log 2>&1 &
                                 VOTE_PID=$!
-                                sleep 3
+                                trap "kill $VOTE_PID 2>/dev/null || true" EXIT
 
-                                if curl -sf http://127.0.0.1:5000/api/config > /dev/null; then
-                                    echo "Vote service HTTP startup and config response verified successfully."
-                                else
+                                # Strict probe: Must return HTTP 200 AND JSON status == 'healthy'
+                                python3 -c "
+import urllib.request, json, time, sys
+for attempt in range(20):
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:5000/api/health', timeout=3) as resp:
+            if resp.status == 200:
+                data = json.loads(resp.read().decode('utf-8'))
+                if data.get('status') == 'healthy':
+                    print('Vote /api/health passed: status=healthy (HTTP 200 OK)')
+                    sys.exit(0)
+                else:
+                    print('ERROR: Vote reported non-healthy status: %s' % data)
+                    sys.exit(1)
+            else:
+                print('ERROR: Unexpected HTTP status %s' % resp.status)
+                sys.exit(1)
+    except Exception as e:
+        time.sleep(1)
+print('ERROR: Vote service failed to respond with healthy status')
+sys.exit(1)
+" || {
                                     echo "Vote startup smoke check failed:"
                                     cat /tmp/vote-smoke.log
-                                    kill $VOTE_PID 2>/dev/null || true
                                     exit 1
-                                fi
-                                kill $VOTE_PID 2>/dev/null || true
+                                }
                             '''
                         }
                     }
@@ -216,24 +252,84 @@ spec:
                 stage('Validate: Result Service (Node.js)') {
                     steps {
                         container('node') {
-                            echo "Validating Result service syntax, npm dependencies, and startup..."
+                            echo "Validating Result service syntax, npm dependencies, and health check..."
                             sh '''
                                 cd votex/result
                                 node -c server.js
                                 npm ci
-                                PORT=5001 node server.js > /tmp/result-smoke.log 2>&1 &
-                                RESULT_PID=$!
-                                sleep 3
 
-                                if curl -sf http://127.0.0.1:5001/api/config > /dev/null; then
-                                    echo "Result service HTTP startup and config response verified successfully."
-                                else
+                                # Establish PostgreSQL readiness before launch
+                                node -e "
+const { Pool } = require('pg');
+const pool = new Pool({ host: '127.0.0.1', port: 5432, user: 'postgres', password: 'postgres', database: 'postgres', connectionTimeoutMillis: 2000 });
+let retries = 30;
+function waitDb() {
+    pool.query('SELECT 1', (err) => {
+        if (!err) {
+            console.log('PostgreSQL is ready for Result service.');
+            pool.end();
+            process.exit(0);
+        }
+        if (--retries <= 0) {
+            console.error('ERROR: Timeout waiting for PostgreSQL:', err ? err.message : 'timeout');
+            process.exit(1);
+        }
+        setTimeout(waitDb, 1000);
+    });
+}
+waitDb();
+"
+
+                                REDIS_HOST=127.0.0.1 POSTGRES_HOST=127.0.0.1 POSTGRES_PASSWORD=postgres PORT=5001 node server.js > /tmp/result-smoke.log 2>&1 &
+                                RESULT_PID=$!
+                                trap "kill $RESULT_PID 2>/dev/null || true" EXIT
+
+                                # Strict probe: Must return HTTP 200 AND JSON status == 'healthy'
+                                node -e "
+const http = require('http');
+let retries = 20;
+function check() {
+    const req = http.get('http://127.0.0.1:5001/api/health', (res) => {
+        let body = '';
+        res.on('data', chunk => body += chunk);
+        res.on('end', () => {
+            if (res.statusCode !== 200) {
+                if (--retries <= 0) {
+                    console.error('ERROR: Result /api/health returned non-200 HTTP code:', res.statusCode, body);
+                    process.exit(1);
+                }
+                setTimeout(check, 1000);
+                return;
+            }
+            try {
+                const data = JSON.parse(body);
+                if (data.status === 'healthy') {
+                    console.log('Result /api/health passed: status=healthy (HTTP 200 OK)');
+                    process.exit(0);
+                } else {
+                    console.error('ERROR: Result status is not healthy:', data);
+                    process.exit(1);
+                }
+            } catch (e) {
+                console.error('ERROR: Invalid JSON response from Result /api/health:', body);
+                process.exit(1);
+            }
+        });
+    });
+    req.on('error', (err) => {
+        if (--retries <= 0) {
+            console.error('ERROR: Result health probe failed to connect:', err.message);
+            process.exit(1);
+        }
+        setTimeout(check, 1000);
+    });
+}
+check();
+" || {
                                     echo "Result startup smoke check failed:"
                                     cat /tmp/result-smoke.log
-                                    kill $RESULT_PID 2>/dev/null || true
                                     exit 1
-                                fi
-                                kill $RESULT_PID 2>/dev/null || true
+                                }
                             '''
                         }
                     }
@@ -243,11 +339,57 @@ spec:
                         container('python') {
                             echo "Validating Worker daemon syntax, configuration, and connectivity..."
                             sh '''
-                                python3 -m pip install --upgrade pip -r votex/worker/requirements.txt
+                                python3 -m pip install --no-cache-dir -r votex/worker/requirements.txt
                                 python3 -m py_compile votex/worker/app.py
-                                python3 -c "import redis, psycopg2; print('Worker dependencies verified')"
-                                timeout 5 python3 votex/worker/app.py || [ $? -eq 124 ]
-                                echo "Worker daemon startup and event loop loop verified."
+
+                                # Verify Redis & Postgres prerequisites
+                                python3 -c "
+import time, redis, psycopg2, sys
+for _ in range(30):
+    try:
+        r = redis.Redis(host='127.0.0.1', port=6379, socket_timeout=2)
+        r.ping()
+        c = psycopg2.connect(host='127.0.0.1', port=5432, user='postgres', password='postgres', dbname='postgres', connect_timeout=2)
+        c.close()
+        print('Prerequisites verified: Redis & Postgres connected for Worker.')
+        sys.exit(0)
+    except Exception:
+        time.sleep(1)
+print('ERROR: Timeout waiting for Redis/Postgres for Worker')
+sys.exit(1)
+"
+
+                                REDIS_HOST=127.0.0.1 POSTGRES_HOST=127.0.0.1 POSTGRES_PASSWORD=postgres python3 votex/worker/app.py > /tmp/worker-smoke.log 2>&1 &
+                                WORKER_PID=$!
+                                trap "kill -TERM $WORKER_PID 2>/dev/null || true" EXIT
+
+                                # Positive confirmation of startup in worker log
+                                python3 -c "
+import time, sys
+for attempt in range(20):
+    try:
+        with open('/tmp/worker-smoke.log', 'r') as f:
+            content = f.read()
+        if 'Connected to PostgreSQL database successfully' in content and 'Connected to Redis successfully' in content:
+            print('Worker daemon successfully initialized, connected to Redis and PostgreSQL.')
+            sys.exit(0)
+    except Exception:
+        pass
+    time.sleep(1)
+print('ERROR: Worker daemon failed to confirm startup in log:')
+sys.exit(1)
+" || {
+                                    cat /tmp/worker-smoke.log
+                                    exit 1
+                                }
+
+                                # Verify clean shutdown handling
+                                kill -TERM $WORKER_PID
+                                sleep 2
+                                if kill -0 $WORKER_PID 2>/dev/null; then
+                                    kill -KILL $WORKER_PID 2>/dev/null || true
+                                fi
+                                echo "Worker daemon startup, database initialization, and shutdown verified."
                             '''
                         }
                     }
@@ -306,10 +448,9 @@ spec:
                 container('docker') {
                     echo "Building container images for ${IMAGE_TAG}..."
                     sh '''
-                        docker build --target final -t ${VOTE_IMAGE}:${IMAGE_TAG} -t ${VOTE_IMAGE}:latest ./votex/vote
-                        docker build -t ${RESULT_IMAGE}:${IMAGE_TAG} -t ${RESULT_IMAGE}:latest ./votex/result
-                        docker build -t ${WORKER_IMAGE}:${IMAGE_TAG} -t ${WORKER_IMAGE}:latest ./votex/worker
-                        docker build -t ${SEED_IMAGE}:${IMAGE_TAG} -t ${SEED_IMAGE}:latest ./votex/seed-data
+                        docker build --target final -t ${VOTE_IMAGE}:${IMAGE_TAG} ./votex/vote
+                        docker build -t ${RESULT_IMAGE}:${IMAGE_TAG} ./votex/result
+                        docker build -t ${WORKER_IMAGE}:${IMAGE_TAG} ./votex/worker
                     '''
                 }
             }
@@ -348,13 +489,8 @@ spec:
                         sh '''
                             echo "$DOCKER_PWD_VAR" | docker login -u "$DOCKER_USER_VAR" --password-stdin
                             docker push ${VOTE_IMAGE}:${IMAGE_TAG}
-                            docker push ${VOTE_IMAGE}:latest
                             docker push ${RESULT_IMAGE}:${IMAGE_TAG}
-                            docker push ${RESULT_IMAGE}:latest
                             docker push ${WORKER_IMAGE}:${IMAGE_TAG}
-                            docker push ${WORKER_IMAGE}:latest
-                            docker push ${SEED_IMAGE}:${IMAGE_TAG}
-                            docker push ${SEED_IMAGE}:latest
                         '''
                     }
                 }
@@ -367,7 +503,7 @@ spec:
                     script {
                         env.DEPLOYMENT_ATTEMPTED = "true"
                     }
-                    echo "Deploying immutable release ${IMAGE_TAG} via Helm..."
+                    echo "Deploying immutable release ${IMAGE_TAG} with version-aware rollback..."
                     withCredentials([file(credentialsId: "${KUBECONFIG_ID}", variable: 'KUBECONFIG')]) {
                         sh '''
                             OTEL_ROLE_ARN="${OTEL_COLLECTOR_ROLE_ARN:-}"
@@ -380,6 +516,27 @@ spec:
                                 exit 1
                             fi
 
+                            rm -f /tmp/deploy-step-status /tmp/votex-prev-revision
+
+                            # Record prior stable revision if it exists
+                            PREV_REVISION="$(helm status votex -n votex -o json 2>/dev/null | python3 -c 'import json,sys; x=json.load(sys.stdin); print(x.get("version","") if x.get("info",{}).get("status") == "deployed" else "")' 2>/dev/null || true)"
+                            if [ -n "$PREV_REVISION" ]; then
+                                echo "Previous deployed Helm revision: ${PREV_REVISION}"
+                                echo "$PREV_REVISION" > /tmp/votex-prev-revision
+                            else
+                                echo "No previous Helm revision detected (initial cluster install)."
+                            fi
+
+                            # Select appropriate rollback flag based on Helm version (Helm 4 vs Helm 3)
+                            HELM_MAJOR="$(helm version --template='{{.Version}}' 2>/dev/null | sed -E 's/^v?([0-9]+).*/\1/' || echo "3")"
+                            if [ "$HELM_MAJOR" -ge 4 ]; then
+                                ROLLBACK_FLAG="--rollback-on-failure"
+                            else
+                                ROLLBACK_FLAG="--atomic"
+                            fi
+
+                            # 1. Helm Upgrade / Install with automatic failure rollback
+                            echo "Deploying release ${IMAGE_TAG} with Helm (flag: ${ROLLBACK_FLAG})..."
                             helm upgrade --install votex ./k8s/helm/votex \
                                 --namespace votex \
                                 --create-namespace \
@@ -388,15 +545,22 @@ spec:
                                 --set result.image.tag=${IMAGE_TAG} \
                                 --set worker.image.tag=${IMAGE_TAG} \
                                 --set otel.collector.serviceAccount.roleArn="${OTEL_ROLE_ARN}" \
+                                "${ROLLBACK_FLAG}" \
                                 --wait --timeout 5m0s
 
+                            echo "HELM_DEPLOY_SUCCESS" > /tmp/deploy-step-status
+
+                            # 2. Deployment Rollout Verifications
                             echo "Verifying deployment rollouts..."
                             kubectl rollout status deployment/vote -n votex --timeout=120s
                             kubectl rollout status deployment/result -n votex --timeout=120s
                             kubectl rollout status deployment/worker -n votex --timeout=120s
 
+                            echo "ROLLOUT_SUCCESS" >> /tmp/deploy-step-status
+
+                            # 3. Post-Deployment Verification via Ansible
                             echo "Verifying deployment CLI tools (Helm, kubectl, Ansible)..."
-                            if ! command -v ansible-playbook &> /dev/null; then
+                            if ! command -v ansible-playbook >/dev/null 2>&1; then
                                 echo "Installing Ansible into deployment container..."
                                 apk add --no-cache ansible-core
                             fi
@@ -404,6 +568,8 @@ spec:
                             echo "Executing Ansible post-deployment verification playbook..."
                             ansible-playbook -i ansible/inventory/hosts.ini.example ansible/verify_deployment.yml \
                                 --extra-vars "k8s_namespace=votex vote_endpoint=http://vote.votex.svc.cluster.local result_endpoint=http://result.votex.svc.cluster.local"
+
+                            echo "POST_VERIFY_SUCCESS" >> /tmp/deploy-step-status
 
                             echo "Running smoke checks against live cluster endpoints..."
                             kubectl get pods,pvc,hpa,svc -n votex -o wide
@@ -417,16 +583,34 @@ spec:
     post {
         always {
             archiveArtifacts artifacts: 'reports/**/*', allowEmptyArchive: true
-            junit testResults: 'reports/tests/*.xml', allowEmptyResults: true
             cleanWs notFailBuild: true
         }
         failure {
             script {
                 if (env.DEPLOYMENT_ATTEMPTED == "true") {
-                    echo "Deployment phase failed. Executing targeted Helm rollback to previous stable revision..."
                     container('deploy') {
                         withCredentials([file(credentialsId: "${KUBECONFIG_ID}", variable: 'KUBECONFIG')]) {
-                            sh 'helm rollback votex -n votex || true'
+                            sh '''
+                                if [ -f /tmp/deploy-step-status ] && grep -q "HELM_DEPLOY_SUCCESS" /tmp/deploy-step-status && ! grep -q "POST_VERIFY_SUCCESS" /tmp/deploy-step-status; then
+                                    echo "Post-deployment health verification failed after Helm release."
+                                    if [ -f /tmp/votex-prev-revision ] && [ -s /tmp/votex-prev-revision ]; then
+                                        TARGET_REV="$(cat /tmp/votex-prev-revision)"
+                                        echo "Initiating explicit rollback to previous verified revision: ${TARGET_REV}..."
+                                        helm rollback votex "${TARGET_REV}" -n votex --wait --timeout 3m0s
+                                        echo "Verifying restored deployment health..."
+                                        kubectl rollout status deployment/vote -n votex --timeout=60s
+                                        kubectl rollout status deployment/result -n votex --timeout=60s
+                                        kubectl rollout status deployment/worker -n votex --timeout=60s
+                                        echo "Rollback to revision ${TARGET_REV} completed and workloads verified Ready."
+                                    else
+                                        echo "Initial release failed post-verification; no prior stable revision exists for rollback."
+                                        echo "Inspecting cluster pod states for diagnostics..."
+                                        kubectl get pods -n votex -o wide
+                                    fi
+                                else
+                                    echo "Helm/preflight failure: inspect actual Helm release status; rollback success has not been independently verified."
+                                fi
+                            '''
                         }
                     }
                 } else {

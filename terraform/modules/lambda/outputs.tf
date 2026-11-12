@@ -9,7 +9,6 @@ output "lambda_name" {
 }
 
 output "alarm_arn" {
-  description = "ARN of the synthetic health check CloudWatch alarm"
-  value       = var.enabled ? aws_cloudwatch_metric_alarm.health_alarm[0].arn : null
+  description = "ARN of the overall synthetic health check CloudWatch alarm"
+  value       = var.enabled ? aws_cloudwatch_metric_alarm.overall_health_alarm[0].arn : null
 }
-

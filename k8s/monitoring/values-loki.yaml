@@ -1,0 +1,68 @@
+# Grafana Loki Helm Values (Single-Binary Mode)
+# Minimal, resource-conscious centralized log store for AWS EKS Option B (2x m7i-flex.large)
+# Retention: 7 days, local gp3 storage, zero distributed cache overhead.
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1
+  schemaConfig:
+    configs:
+      - from: 2024-01-01
+        store: tsdb
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+  storage:
+    type: filesystem
+  compactor:
+    retention_enabled: true
+    compaction_interval: 10m
+    retention_delete_delay: 2h
+  limits_config:
+    retention_period: 168h # 7 days
+    max_query_length: 168h
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 300m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    storageClass: gp3
+    size: 5Gi
+
+# Disable distributed microservices components to minimize resource consumption
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+gateway:
+  enabled: false
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+minio:
+  enabled: false
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+monitoring:
+  selfMonitoring:
+    enabled: false
+
