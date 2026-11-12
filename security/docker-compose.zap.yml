@@ -1,0 +1,7 @@
+services:
+  db:
+    ports: !override []
+  redis:
+    ports: !override []
+  vote:
+    ports: !override []

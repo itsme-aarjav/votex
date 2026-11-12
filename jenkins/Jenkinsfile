@@ -519,6 +519,9 @@ sys.exit(1)
                 container('docker') {
                     echo "Executing OWASP ZAP Dynamic Application Security Testing against candidate release..."
                     sh '''
+                        if ! command -v bash >/dev/null 2>&1 || ! command -v python3 >/dev/null 2>&1; then
+                            apk add --no-cache bash python3
+                        fi
                         chmod +x security/run-zap-scan.sh
                         CANDIDATE_IMAGE="${VOTE_IMAGE}:${IMAGE_TAG}" ./security/run-zap-scan.sh
                     '''
@@ -573,29 +576,19 @@ sys.exit(1)
                                 exit 1
                             fi
 
-                            # Select appropriate rollback flag based on Helm version (Helm 4 vs Helm 3)
-                            HELM_MAJOR="$(helm version --template='{{.Version}}' 2>/dev/null | sed -E 's/^v?([0-9]+).*/\1/' || echo "3")"
-                            if [ "$HELM_MAJOR" -ge 4 ]; then
-                                ROLLBACK_FLAG="--rollback-on-failure"
-                            else
-                                ROLLBACK_FLAG="--atomic"
-                            fi
-
-                            # 1. Helm Upgrade / Install with automatic failure rollback
-                            echo "Deploying release ${IMAGE_TAG} with Helm (flag: ${ROLLBACK_FLAG})..."
+                            # 1. Helm Upgrade
+                            echo "Deploying release ${IMAGE_TAG} with Helm..."
                             helm upgrade votex ./k8s/helm/votex \
                                 --namespace votex \
                                 --reuse-values \
                                 --set vote.image.tag=${IMAGE_TAG} \
                                 --set result.image.tag=${IMAGE_TAG} \
                                 --set worker.image.tag=${IMAGE_TAG} \
-                                --set otel.collector.serviceAccount.roleArn="${OTEL_ROLE_ARN}" \
-                                "${ROLLBACK_FLAG}" \
-                                --wait --timeout 5m0s
+                                --set otel.collector.serviceAccount.roleArn="${OTEL_ROLE_ARN}"
 
                             echo "HELM_DEPLOY_SUCCESS" > /tmp/deploy-step-status
 
-                            # 2. Deployment Rollout Verifications
+                            # 2. Deployment Rollout Verifications (Kubernetes Native)
                             echo "Verifying deployment rollouts..."
                             kubectl rollout status deployment/vote -n votex --timeout=120s
                             kubectl rollout status deployment/result -n votex --timeout=120s
@@ -641,7 +634,7 @@ sys.exit(1)
                                     if [ -f /tmp/votex-prev-revision ] && [ -s /tmp/votex-prev-revision ]; then
                                         TARGET_REV="$(cat /tmp/votex-prev-revision)"
                                         echo "Initiating explicit rollback to previous verified revision: ${TARGET_REV}..."
-                                        helm rollback votex "${TARGET_REV}" -n votex --wait --timeout 3m0s
+                                        helm rollback votex "${TARGET_REV}" -n votex
                                         echo "Verifying restored deployment health..."
                                         kubectl rollout status deployment/vote -n votex --timeout=60s
                                         kubectl rollout status deployment/result -n votex --timeout=60s

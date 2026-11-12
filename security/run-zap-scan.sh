@@ -6,15 +6,21 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPORT_DIR="$ROOT_DIR/reports/zap"
 CONF_FILE="$SCRIPT_DIR/zap-baseline.conf"
 COMPOSE_FILE="$ROOT_DIR/docker/docker-compose.yml"
-
-mkdir -p "$REPORT_DIR"
-chmod 777 "$REPORT_DIR" 2>/dev/null || true
+ZAP_OVERRIDE="$SCRIPT_DIR/docker-compose.zap.yml"
 
 PROJECT_NAME="votex-zap-test"
 TARGET_URL="${1:-}"
 CANDIDATE_IMAGE="${CANDIDATE_IMAGE:-${VOTE_CANDIDATE_IMAGE:-}}"
 CLEANUP_REQUIRED=false
 ZAP_CONTAINER="zap-scan-$$"
+
+COMPOSE_ARGS=(-p "$PROJECT_NAME" -f "$COMPOSE_FILE")
+if [ -f "$ZAP_OVERRIDE" ]; then
+  COMPOSE_ARGS+=(-f "$ZAP_OVERRIDE")
+fi
+
+mkdir -p "$REPORT_DIR"
+chmod 777 "$REPORT_DIR" 2>/dev/null || true
 
 cleanup() {
   local exit_status=$?
@@ -23,7 +29,7 @@ cleanup() {
   fi
   if [ "$CLEANUP_REQUIRED" = "true" ]; then
     echo "Tearing down isolated ZAP candidate deployment..."
-    docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" down -v >/dev/null 2>&1 || true
+    docker compose "${COMPOSE_ARGS[@]}" down -v >/dev/null 2>&1 || true
   fi
   exit "$exit_status"
 }
@@ -36,12 +42,12 @@ if [ -z "$TARGET_URL" ]; then
   fi
   echo "Spinning up isolated candidate release for DAST testing..."
   CLEANUP_REQUIRED=true
-  docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" up -d db redis vote
+  docker compose "${COMPOSE_ARGS[@]}" up -d db redis vote
 
   echo "Waiting for candidate release container to become healthy..."
   READY=false
   for i in {1..30}; do
-    VOTE_CID=$(docker compose -p "$PROJECT_NAME" -f "$COMPOSE_FILE" ps -q vote 2>/dev/null || docker ps -q --filter "name=${PROJECT_NAME}-vote" | head -n 1)
+    VOTE_CID=$(docker compose "${COMPOSE_ARGS[@]}" ps -q vote 2>/dev/null || docker ps -q --filter "name=${PROJECT_NAME}-vote" | head -n 1)
     if [ -n "$VOTE_CID" ]; then
       STATUS=$(docker inspect --format '{{.State.Health.Status}}' "$VOTE_CID" 2>/dev/null || echo "")
       if [ "$STATUS" = "healthy" ]; then
@@ -64,7 +70,12 @@ if [ -z "$TARGET_URL" ]; then
   fi
 
   TARGET_URL="http://vote:80/"
-  NETWORK_ARG="--network ${PROJECT_NAME}_front-tier"
+  DETECTED_NET=$(docker network ls --filter "name=${PROJECT_NAME}" --format '{{.Name}}' | grep front-tier | head -n 1 || true)
+  if [ -n "$DETECTED_NET" ]; then
+    NETWORK_ARG="--network $DETECTED_NET"
+  else
+    NETWORK_ARG="--network ${PROJECT_NAME}_front-tier"
+  fi
 else
   echo "Scanning external/provided target: $TARGET_URL"
   NETWORK_ARG=""
@@ -75,6 +86,8 @@ echo "Executing OWASP ZAP Baseline DAST Scan against $TARGET_URL..."
 # DinD-compatible execution: use container copy for config and report extraction
 docker create --name "$ZAP_CONTAINER" \
   $NETWORK_ARG \
+  -u 0:0 \
+  -v /zap/wrk \
   ghcr.io/zaproxy/zaproxy:stable zap-baseline.py \
     -t "$TARGET_URL" \
     -c /zap/rules.conf \

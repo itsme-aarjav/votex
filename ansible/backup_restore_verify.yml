@@ -23,6 +23,16 @@
   tasks:
     - name: Disaster Recovery Verification Workflow
       block:
+        - name: 0. Initialize deterministic backup facts
+          ansible.builtin.set_fact:
+            backup_timestamp: "{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+
+        - name: Set deterministic backup and verification paths
+          ansible.builtin.set_fact:
+            verify_db_name: "votex_verify_{{ backup_timestamp }}"
+            remote_backup_path: "/tmp/votex_backup_{{ backup_timestamp }}.dump"
+            local_backup_path: "/tmp/votex_backup_{{ backup_timestamp }}.dump"
+
         - name: "Preflight safety check: prevent using Terraform state bucket for database backups"
           ansible.builtin.assert:
             that:

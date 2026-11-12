@@ -16,7 +16,7 @@ metadata:
   name: jenkins-cluster-viewer
 rules:
 - apiGroups: [""]
-  resources: ["namespaces", "nodes"]
+  resources: ["namespaces", "nodes", "services"]
   verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

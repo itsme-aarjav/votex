@@ -1,14 +1,15 @@
 FROM node:24-slim
 
-# add curl for healthcheck
+# add curl for healthcheck and upgrade OS packages
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends curl tini && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/local/app
 
-# have nodemon available for local dev use (file watching)
-RUN npm install -g nodemon
+# have nodemon available for local dev use (file watching) and ensure latest npm
+RUN npm install -g nodemon npm@latest
 
 COPY package*.json ./
 

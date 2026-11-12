@@ -1,17 +1,20 @@
 # Define a base stage that uses the official python runtime base image
 FROM python:3.11-slim AS base
 
-# Add curl for healthcheck
+# Add curl for healthcheck and upgrade OS packages
 RUN apt-get update && \
+    apt-get upgrade -y && \
     apt-get install -y --no-install-recommends curl && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir --upgrade jaraco.context pip setuptools wheel
 
 # Set the application directory
 WORKDIR /usr/local/app
 
 # Install our requirements.txt
 COPY requirements.txt ./requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+    find /usr/local/lib/python3.11/site-packages -name "*.cdx.json" -delete
 
 # Define a stage specifically for development, where it'll watch for
 # filesystem changes
