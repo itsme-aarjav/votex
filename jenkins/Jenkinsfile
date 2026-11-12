@@ -9,6 +9,7 @@ metadata:
   labels:
     app.kubernetes.io/name: votex-jenkins-agent
 spec:
+  serviceAccountName: jenkins
   volumes:
     - name: docker-sock
       emptyDir: {}
@@ -180,8 +181,7 @@ spec:
                     env.GIT_COMMIT_SHORT = sh(returnStdout: true, script: 'git rev-parse --short=7 HEAD').trim()
                     env.IMAGE_TAG = "v2.1.${env.BUILD_NUMBER}-${env.GIT_COMMIT_SHORT}"
 
-                    if (env.SKIP_CREDENTIAL_CHECK != "true") {
-                        def missingCreds = []
+                    def missingCreds = []
                         try {
                             withCredentials([usernamePassword(credentialsId: env.DOCKER_CRED_ID, usernameVariable: 'D_U', passwordVariable: 'D_P')]) {
                                 echo "Verified credential: ${env.DOCKER_CRED_ID}"
@@ -206,7 +206,6 @@ spec:
                         if (missingCreds) {
                             error "PIPELINE ABORTED: Missing required Jenkins credentials: " + missingCreds.join(', ') + ". Add them to Jenkins Credentials before triggering build."
                         }
-                    }
                 }
                 sh '''
                     echo "Deterministic Release Tag: ${IMAGE_TAG}"
@@ -571,7 +570,8 @@ sys.exit(1)
                                 echo "Previous deployed Helm revision: ${PREV_REVISION}"
                                 echo "$PREV_REVISION" > /tmp/votex-prev-revision
                             else
-                                echo "No previous Helm revision detected (initial cluster install)."
+                                echo "ERROR: Votex Helm release must be bootstrapped by ops/deploy.sh --full before Jenkins CD." >&2
+                                exit 1
                             fi
 
                             # Select appropriate rollback flag based on Helm version (Helm 4 vs Helm 3)
@@ -584,10 +584,9 @@ sys.exit(1)
 
                             # 1. Helm Upgrade / Install with automatic failure rollback
                             echo "Deploying release ${IMAGE_TAG} with Helm (flag: ${ROLLBACK_FLAG})..."
-                            helm upgrade --install votex ./k8s/helm/votex \
+                            helm upgrade votex ./k8s/helm/votex \
                                 --namespace votex \
-                                --create-namespace \
-                                -f ./k8s/helm/votex/values-eks.yaml \
+                                --reuse-values \
                                 --set vote.image.tag=${IMAGE_TAG} \
                                 --set result.image.tag=${IMAGE_TAG} \
                                 --set worker.image.tag=${IMAGE_TAG} \

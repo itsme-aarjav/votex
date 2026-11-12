@@ -8,9 +8,7 @@ Votex is an enterprise 5-tier microservices polling and real-time analytics plat
 
 The application comprises a user-facing voting portal, an in-memory stream buffer, an asynchronous persistence worker daemon, and a live analytics dashboard:
 
-| Vote Microservice (Python / Flask) | Result Analytics (Node.js / Socket.IO) |
-| :---: | :---: |
-| ![Vote Service UI](docs/images/vote-service-ui.png) | ![Result Service UI](docs/images/result-service-ui.png) |
+Vote is a Python/Flask interface; Result is a Node.js/Socket.IO analytics dashboard. Fresh live screenshots will be captured after the first AWS deployment.
 
 ### Microservices Data Flow
 
@@ -48,7 +46,7 @@ The application comprises a user-facing voting portal, an in-memory stream buffe
 
 Every commit to `main` executes an automated, 9-stage declarative Jenkins pipeline running on ephemeral Kubernetes agents inside the EKS cluster:
 
-![Jenkins CI/CD Pipeline](docs/images/jenkins-cicd-pipeline.png)
+Live Jenkins pipeline evidence will be captured during the approved AWS demo.
 
 ### The 9 Pipeline Stages & Security Gates
 
@@ -77,13 +75,11 @@ Every commit to `main` executes an automated, 9-stage declarative Jenkins pipeli
 | **9** | **EKS Deployment & Verification** | Helm 3/4, kubectl, Ansible | Selects version-compatible rollback behavior; verifies rollout and Ansible checks, and tests restoring the previously deployed revision on post-deploy failure. Live proof pending. |
 
 > [!NOTE]
-> Detailed application unit and integration suites (`votex/tests/`, `votex/result/tests/`) remain local-only on the developer's workstation for rapid iteration. CI Stage 2 executes standalone syntax, import, and process smoke checks, ensuring deterministic, hermetic pipeline builds on clean repository checkouts.
+> Application unit and integration test results were independently verified offline before pre-deployment workspace cleanup. CI Stage 2 executes standalone syntax, import, dependency, and process smoke checks, ensuring deterministic, hermetic pipeline builds on clean repository checkouts.
 
-### Code Quality & Security Evidence (SonarQube)
+### SonarQube Quality Gate Evidence
 
-| Quality Gate Overview | Code Quality & Vulnerability Breakdown |
-| :---: | :---: |
-| ![SonarQube Quality Gate](docs/images/sonarqube-quality-gate.png) | ![SonarQube Issues Analysis](docs/images/sonarqube-issues-analysis.png) |
+Live SonarQube Quality Gate screenshots will be captured during the approved AWS demo.
 
 ---
 
@@ -126,7 +122,7 @@ The platform avoids duplicate pipelines by maintaining strict boundaries across 
 
 All cloud infrastructure is provisioned through modular Terraform in `eu-north-1` (Stockholm):
 
-![AWS EKS EC2 Instances](docs/images/aws-eks-ec2-nodes.png)
+Live EKS and EC2 node screenshots will be captured during the approved AWS demo.
 
 - **Isolated Custom VPC (`10.0.0.0/16`)**:
   - **2 Public Subnets** (`10.0.1.0/24`, `10.0.2.0/24`): Host the NAT Gateway and internet-facing Application Load Balancer.
@@ -215,13 +211,17 @@ To avoid the circular dependency where an EKS stack attempts to manage the bucke
 ### Operations helpers (`ops/`)
 
 - `bash ops/dashboard.sh`: read-only status and access dashboard for Vote, Result, Jenkins, SonarQube, Grafana, Prometheus, AWS X-Ray, CloudWatch, and Lambda. Handles offline/unreachable cluster gracefully and provides secure credential retrieval instructions.
-- `bash ops/deploy.sh` (default `--offline`): `--offline` performs Terraform formatting, backend-disabled initialization, and validation. `--plan` generates an AWS-backed speculative plan with S3 backend. `--full` performs an approval-gated 23-step platform deployment with strict identity and CIDR preflights.
-- `bash ops/destroy.sh`: **destructive** teardown workflow. Requires the exact `EXPECTED_AWS_ACCOUNT_ID`, EKS and initialized backend checks and two human confirmations. Never run during offline checks.
+- `bash ops/deploy.sh` (default `--offline`): `--offline` performs Terraform formatting, backend-disabled initialization, and validation. `--plan` generates an AWS-backed speculative plan with S3 backend. `--full` performs an approval-gated 24-step platform deployment with strict identity and CIDR preflights.
+- `bash ops/destroy.sh`: safe cloud decommissioning automation. Supports both standard full-cluster teardown (`ops/destroy.sh`) and explicit partial-infrastructure recovery (`ops/destroy.sh --recover-partial`).
 
-## 7. Safe Teardown (`ops/destroy.sh`)
+## 7. Safe Teardown & Partial Recovery (`ops/destroy.sh`)
 
-To eliminate lingering AWS costs after live demonstrations, `ops/destroy.sh` executes a strict, ordered decommissioning sequence:
+**Fail-closed recovery:** Only EKS `ResourceNotFoundException` or a matching-ARN `FAILED` EKS status permits `--recover-partial`. AWS API errors and transitional statuses abort. The operations mock suite runs from a disposable project copy and must not modify local Terraform backend metadata.
 
+To eliminate lingering AWS costs after live demonstrations or failed provisioning runs, `ops/destroy.sh` provides two strictly validated, non-destructive recovery and teardown workflows:
+
+### A. Standard Full Teardown (`ops/destroy.sh`)
+Executes when a healthy, active EKS cluster is operational:
 1. **Pre-teardown Diagnostics**: Captures cluster pod logs and configuration to `reports/teardown-<timestamp>/`.
 2. **Ingress Deletion**: Deletes Kubernetes Ingress objects, allowing the running AWS Load Balancer Controller to reconcile and deprovision the Application Load Balancer.
 3. **ELBv2 Verification (Controller Kept Active)**: Polls the AWS ELBv2 API (`aws elbv2 describe-load-balancers`) to confirm all ALBs tagged `votex-platform` are fully deleted before tearing down the controller.
@@ -230,6 +230,14 @@ To eliminate lingering AWS costs after live demonstrations, `ops/destroy.sh` exe
 6. **Terraform Infrastructure Destruction**: Plans and applies `terraform plan -destroy` after explicit operator confirmation (`confirm-terraform-destroy`).
 7. **S3 State Preservation**: The S3 remote state bucket is strictly preserved to maintain audit trails and configuration state.
 8. **Cloud Audit**: Inspects remaining cloud resources for project-specific leftovers; zero charges must not be assumed from an account-wide listing.
+
+### B. Partial-Infrastructure Recovery Mode (`ops/destroy.sh --recover-partial`)
+Used when Terraform partially provisions cloud infrastructure (such as VPC, Subnets, NAT Gateways, or IAM roles), but EKS cluster creation fails or times out before Kubernetes control plane becomes reachable:
+- **Mandatory Preflight Checks**: Verifies caller identity (`EXPECTED_AWS_ACCOUNT_ID`), region (`eu-north-1`), S3 remote state backend accessibility with native locking (`use_lockfile=true`), and checks Terraform state ownership.
+- **EKS State Guard**: Confirms the EKS cluster is absent (`ABSENT`) or in a non-ready state (`FAILED`/`CREATING`). If a healthy, active cluster is detected, recovery mode is safely rejected to prevent bypassing ALB controller deprovisioning.
+- **Bypasses Kubernetes Workload Draining**: Skips `kubectl` workload calls (which would fail against an absent control plane) and proceeds directly to Terraform destruction.
+- **Human Approval Gate**: Inspects the exact `terraform plan -destroy` and requires explicit confirmation (`confirm-partial-recovery-destroy`).
+- **Preserves S3 State Bucket & Evidence**: Deletes billable orphaned resources (VPC, NAT Gateways, IAM), verifies state emptiness, audits cloud footprint, and preserves the remote S3 state bucket and diagnostic logs.
 
 ---
 
@@ -300,11 +308,7 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
      -f ./k8s/monitoring/values-alloy.yaml \
      --namespace logging
    ```
-9. **Jenkins & SonarQube Deployment**: Deploy CI/CD controllers into their isolated namespaces. Jenkins is provisioned via JCasC with Job DSL to automatically create `votex-pipeline` tracking `main`, and an admin password retrieved from the `jenkins-admin-credentials` Kubernetes secret. SonarQube is configured with an internal Quality Gate callback webhook to `http://jenkins.jenkins.svc.cluster.local:8080/sonarqube-webhook/`:
-   ```bash
-   kubectl apply -f jenkins/jenkins.yaml
-   kubectl apply -f sonarqube/sonarqube.yaml
-   ```
+9. **Jenkins & SonarQube Deployment**: Use the approved `ops/deploy.sh --full` orchestration rather than directly applying the Jenkins manifest. The deployment bootstraps `jenkins-admin-credentials`, `jenkins-pipeline-credentials`, and `jenkins-agent-kubeconfig`; JCasC provisions `dockerhub-credentials`, `sonarqube-token`, and `k8s-kubeconfig`. Before paid provisioning, securely supply `VOTEX_DOCKERHUB_USERNAME` and `VOTEX_DOCKERHUB_TOKEN`. On a fresh SonarQube instance, initialize/rotate the administrator password and provide a valid administrator API token via `SONARQUBE_API_TOKEN` or the hidden interactive prompt. Real Jenkins and webhook functionality requires live verification.
 
 ### Phase C: Ingress, Security & Pipeline Execution
 10. **Domain, ACM & HTTPS Ingress**: Obtain verified operator-owned hostnames and an issued ACM certificate in `eu-north-1`. The application Ingress is intentionally disabled in `values-eks.yaml`. Once domains/certificate exist, use an untracked deployment-only override (run from repository root) to enable Vote and Result HTTPS:
@@ -341,7 +345,11 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
     - `dockerhub-credentials`: Username & Password for Docker Hub candidate publishing.
     - `k8s-kubeconfig`: Secret file containing cluster kubeconfig for Helm continuous delivery.
     - `sonarqube-token`: Secret text analysis token for SonarQube SAST and Quality Gate callback.
-12. **Jenkins 9-Stage Pipeline Execution**: Trigger declarative pipeline on `main`. Executes all 9 stages: Checkout, Build & Smoke Validation, SonarQube SAST, Trivy Filesystem, Docker Build, Trivy Image, OWASP ZAP DAST, Docker Hub Publish, and EKS Deploy & Verification.
+12. **Jenkins 9-Stage Pipeline Execution & Automatic SCM Trigger**:
+    - **Trigger Mechanism**: The pipeline is pre-configured with outbound periodic SCM polling (`pollSCM('H/5 * * * *')` in `Jenkinsfile` and `triggers { scm('H/5 * * * *') }` in Job DSL). Outbound polling eliminates fragile webhook-relay infrastructure since the internal Jenkins service cannot receive inbound GitHub webhooks directly.
+    - **Commit Batching & Concurrency Guard**: SCM polling polls GitHub `main` every 5 minutes. If multiple commits are pushed within an interval, SCM polling detects the latest HEAD and triggers a single consolidated build rather than queueing redundant intermediate builds. `disableConcurrentBuilds()` strictly prevents overlapping runs.
+    - **First-Run Bootstrap**: JCasC and Job DSL register the pipeline and trigger definition automatically on Jenkins startup. The operator can run the first build manually or let the periodic poll detect the initial commit.
+    - **9 Main Stages**: The pipeline sequentially executes: 1. Checkout SCM, 2. Service Build & Smoke Validation, 3. SonarQube SAST & Quality Gate, 4. Trivy Filesystem Scan, 5. Docker Build, 6. Trivy Image Scan, 7. OWASP ZAP DAST, 8. Docker Hub Publish, and 9. EKS Deployment & Verification.
 
 ### Phase D: Operational Verification & Evidence
 13. **Load Testing & HPA Verification**: Run k6 traffic generation against the live ingress URL:
@@ -395,7 +403,7 @@ The platform enforces strict container security standards while transparently ad
 | Component / Capability | Implementation State | Offline Validation Status | Live AWS Requirement | Verification State |
 | :--- | :---: | :---: | :--- | :---: |
 | **VPC & EKS Node Infrastructure** | Implemented (`terraform/`) | `terraform validate`, `plan` (33 adds) | AWS account, VPC, EKS cluster creation | Pending authorization |
-| **Microservices (Vote, Result, Worker)** | Implemented (`votex/`) | 51 Pytest, 10 Node.js unit tests pass | EKS cluster, Docker images pulled | Offline Validated |
+| **Microservices (Vote, Result, Worker)** | Implemented (`votex/`) | Unit, reliability, and service smoke checks verified offline | EKS cluster, Docker images pulled | Offline Validated |
 | **Redis & PostgreSQL Storage** | Implemented (`k8s/helm/votex`) | Helm template & linting valid | AWS EBS gp3 dynamic volume attachment | Offline Validated |
 | **Jenkins 9-Stage CI/CD** | Implemented (`jenkins/Jenkinsfile`) | Syntax, POSIX shell check, container image validated | EKS Kubernetes cloud, SonarQube token, Docker Hub credentials | Offline Validated |
 | **Prometheus & Grafana Monitoring** | Implemented (`k8s/monitoring/`) | Values linted, Helm chart render validated | EKS cluster, EBS gp3 PVCs | Offline Validated |

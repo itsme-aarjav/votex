@@ -38,8 +38,8 @@ metadata:
   name: jenkins-deployer-role
   namespace: votex
 rules:
-- apiGroups: ["", "apps", "batch", "autoscaling", "networking.k8s.io"]
-  resources: ["deployments", "services", "pods", "pods/exec", "pods/log", "persistentvolumeclaims", "configmaps", "secrets", "ingresses", "horizontalpodautoscalers"]
+- apiGroups: ["", "apps", "batch", "autoscaling", "networking.k8s.io", "policy"]
+  resources: ["deployments", "statefulsets", "services", "serviceaccounts", "pods", "pods/exec", "pods/log", "persistentvolumeclaims", "configmaps", "secrets", "ingresses", "horizontalpodautoscalers", "poddisruptionbudgets"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -125,10 +125,31 @@ data:
       authorizationStrategy:
         loggedInUsersCanDoAnything:
           allowAnonymousRead: false
+    credentials:
+      system:
+        domainCredentials:
+          - credentials:
+              - usernamePassword:
+                  scope: GLOBAL
+                  id: "dockerhub-credentials"
+                  username: "${VOTEX_DOCKERHUB_USERNAME}"
+                  password: "${VOTEX_DOCKERHUB_TOKEN}"
+              - string:
+                  scope: GLOBAL
+                  id: "sonarqube-token"
+                  secret: "${VOTEX_SONARQUBE_TOKEN}"
+              - file:
+                  scope: GLOBAL
+                  id: "k8s-kubeconfig"
+                  fileName: "kubeconfig"
+                  secretBytes: "${readFileBase64:/var/jenkins_home/credentials/kubeconfig}"
     jobs:
       - script: >
           pipelineJob('votex-pipeline') {
             description('Votex 9-stage DevSecOps Delivery Pipeline')
+            triggers {
+              scm('H/5 * * * *')
+            }
             definition {
               cpsScm {
                 scm {
@@ -214,6 +235,11 @@ spec:
             secretKeyRef:
               name: jenkins-admin-credentials
               key: jenkins-admin-password
+        - name: CASC_STRICT_SECRET_RESOLUTION
+          value: "true"
+        envFrom:
+        - secretRef:
+            name: jenkins-pipeline-credentials
         resources:
           requests:
             cpu: 300m
@@ -226,6 +252,9 @@ spec:
           mountPath: /var/jenkins_home
         - name: casc-config
           mountPath: /var/jenkins_home/casc_configs
+        - name: agent-kubeconfig
+          mountPath: /var/jenkins_home/credentials
+          readOnly: true
       volumes:
       - name: jenkins-home
         persistentVolumeClaim:
@@ -233,6 +262,9 @@ spec:
       - name: casc-config
         configMap:
           name: jenkins-casc
+      - name: agent-kubeconfig
+        configMap:
+          name: jenkins-agent-kubeconfig
 ---
 apiVersion: v1
 kind: Service

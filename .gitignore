@@ -1,51 +1,31 @@
-*.pyc
-*.pyo
+# Python and Node
 __pycache__/
-project.lock.json
-bin/
-obj/
-.vs/
-.vscode/
-.idea/
+*.py[cod]
+.pytest_cache/
+.coverage*
+.venv/
 node_modules/
-.DS_Store
 
 # Terraform
+.terraform/
+*.tfstate*
 *.tfplan
 tfplan
-.terraform/
-*.tfstate
-*.tfstate.*
-crash.log
-crash.*.log
 *.tfvars
 !*.tfvars.example
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
+crash.log
+crash.*.log
 .terraformrc
 terraform.rc
 
-# Secrets & Local Env
+# Secrets
 .env
 .env.*
 *.pem
 *.key
 kubeconfig*
 
-# Media Recordings & Raw Dump (Preserved locally, not committed to git)
-*.mov
-screen-recordings-and ss/
-
-# Pipeline & Test Reports
-reports/
-.pytest_cache/
-.coverage
-.coverage.*
-.venv/
-*.zip
-
-# Local-only application test suites (preserved locally on workstation, untracked in Git)
-votex/tests/
-votex/result/tests/

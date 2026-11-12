@@ -29,7 +29,7 @@ handle_error() {
   echo "  3. To resume or retry after fixing the blocker, re-run:" >&2
   echo "     EXPECTED_AWS_ACCOUNT_ID=\"\${EXPECTED_AWS_ACCOUNT_ID}\" OPERATOR_CIDR=\"\${OPERATOR_CIDR}\" ops/deploy.sh --full" >&2
   echo "  4. To tear down partially provisioned resources cleanly, run:" >&2
-  echo "     ops/destroy.sh" >&2
+  echo "     ops/destroy.sh (or 'ops/destroy.sh --recover-partial' if EKS was not reached)" >&2
   echo "==============================================================================" >&2
   exit "$exit_code"
 }
@@ -218,6 +218,12 @@ for img_tuple in "aarjavjainn/votex-vote:v2.0.0" "aarjavjainn/votex-result:v2.0.
   echo "Verified bootstrap image: $repo:$tag (amd64)"
 done
 
+if [ -z "${VOTEX_DOCKERHUB_USERNAME:-}" ] || [ -z "${VOTEX_DOCKERHUB_TOKEN:-}" ]; then
+  echo "ERROR: Supply VOTEX_DOCKERHUB_USERNAME and VOTEX_DOCKERHUB_TOKEN securely before paid provisioning." >&2
+  echo "These inputs are needed to bootstrap actual Jenkins credentials; the pipeline will not use placeholders." >&2
+  exit 1
+fi
+
 # Step 8: Verify S3 backend/bootstrap prerequisites
 CURRENT_STEP="[8/24] Terraform Remote State Backend Verification"
 echo "$CURRENT_STEP..."
@@ -261,7 +267,7 @@ echo ""
 echo "=============================================================================="
 echo "COST WARNING & APPROVAL GATE:"
 echo "Target: EKS Option B (2x m7i-flex.large) in $REGION."
-echo "Estimated compute cost: ~\$0.20-\$0.25/hr (EKS Control Plane + 2 EC2 nodes)."
+echo "Costs include EKS control plane, 2 EC2 workers, NAT, ALB, EBS, logging and data transfer; verify current AWS pricing before approval."
 echo "Explicit human authorization is required before provisioning live AWS resources."
 echo "=============================================================================="
 echo ""
@@ -295,7 +301,7 @@ if [ "$NODE_COUNT" -ne 2 ]; then
   echo "ERROR: Expected exactly 2 worker nodes, found $NODE_COUNT." >&2
   exit 1
 fi
-READY_COUNT="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | grep -c "True" || echo "0")"
+READY_COUNT="$(kubectl get nodes -o jsonpath='{range .items[*]}{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}' | awk '$1 == "True" { n++ } END { print n+0 }')"
 if [ "$READY_COUNT" -ne 2 ]; then
   echo "ERROR: Expected 2 Ready nodes, but only $READY_COUNT are Ready." >&2
   exit 1
@@ -404,13 +410,7 @@ fi
 # Bootstrap SonarQube administrator secret if not already existing
 if ! kubectl get secret sonarqube-admin-credentials -n sonarqube >/dev/null 2>&1; then
   echo "Bootstrapping sonarqube-admin-credentials in sonarqube namespace..."
-  SQ_BOOTSTRAP_PASS="${SONAR_ADMIN_PASSWORD:-admin}"
-  kubectl create namespace sonarqube --dry-run=client -o yaml | kubectl apply -f -
-  kubectl create secret generic sonarqube-admin-credentials \
-    --namespace sonarqube \
-    --from-literal=username=admin \
-    --from-literal=password="$SQ_BOOTSTRAP_PASS" \
-    --dry-run=client -o yaml | kubectl apply -f -
+  echo "No SonarQube admin credentials stored. Configure the real administrator account in SonarQube, then supply a valid API token for webhook setup."
 else
   echo "Preserving existing sonarqube-admin-credentials in sonarqube namespace."
 fi
@@ -461,11 +461,54 @@ fi
 # Step 20: Deploy Jenkins, SonarQube, and configure Quality Gate webhook (Phase 2 & Phase 3)
 CURRENT_STEP="[20/24] CI/CD Infrastructure & Quality Gate Webhook Configuration"
 echo "$CURRENT_STEP..."
-kubectl apply -f "$ROOT_DIR/jenkins/jenkins.yaml"
 kubectl apply -f "$ROOT_DIR/sonarqube/sonarqube.yaml"
 
 echo "Waiting for SonarQube rollout and health readiness..."
 kubectl rollout status deployment/sonarqube -n sonarqube --timeout=300s
+
+SONAR_TOKEN="${SONARQUBE_API_TOKEN:-${SONAR_AUTH_TOKEN:-}}"
+if [ -z "$SONAR_TOKEN" ]; then
+  echo "SonarQube requires one-time administrator initialization and API token creation."
+  echo "Use the existing Kubernetes deployment to initialize SonarQube privately, rotate its default password, and create a Webhooks-admin API token."
+  read -r -s -p "Enter the approved SonarQube administrator API token (hidden input): " SONAR_TOKEN
+  echo
+fi
+if [ -z "$SONAR_TOKEN" ]; then
+  echo "ERROR: A real SonarQube API token is mandatory. Nothing will be reported as CI/CD-ready." >&2
+  exit 1
+fi
+
+export VOTEX_DOCKERHUB_USERNAME VOTEX_DOCKERHUB_TOKEN
+export VOTEX_SONARQUBE_TOKEN="${VOTEX_SONARQUBE_TOKEN:-$SONAR_TOKEN}"
+python3 -c '
+import os, json, base64
+keys = ("VOTEX_DOCKERHUB_USERNAME", "VOTEX_DOCKERHUB_TOKEN", "VOTEX_SONARQUBE_TOKEN")
+data = {key: base64.b64encode(os.environ[key].encode()).decode() for key in keys}
+print(json.dumps({"apiVersion":"v1","kind":"Secret","metadata":{"name":"jenkins-pipeline-credentials","namespace":"jenkins"},"type":"Opaque","data":data}))
+' | kubectl apply -f -
+
+cat <<'KUBE' | kubectl create configmap jenkins-agent-kubeconfig -n jenkins --from-file=kubeconfig=/dev/stdin --dry-run=client -o yaml | kubectl apply -f -
+apiVersion: v1
+kind: Config
+clusters:
+- name: in-cluster
+  cluster:
+    server: https://kubernetes.default.svc.cluster.local
+    certificate-authority: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+contexts:
+- name: jenkins
+  context:
+    cluster: in-cluster
+    namespace: votex
+    user: jenkins
+current-context: jenkins
+users:
+- name: jenkins
+  user:
+    tokenFile: /var/run/secrets/kubernetes.io/serviceaccount/token
+KUBE
+
+kubectl apply -f "$ROOT_DIR/jenkins/jenkins.yaml"
 kubectl rollout status deployment/jenkins -n jenkins --timeout=300s
 
 SONAR_POD="$(kubectl get pod -l app=sonarqube -n sonarqube -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")"
@@ -474,29 +517,8 @@ if [ -z "$SONAR_POD" ]; then
   exit 1
 fi
 
-echo "Retrieving SonarQube administrative credentials for webhook registration..."
-SONAR_TOKEN="${SONARQUBE_API_TOKEN:-${SONAR_AUTH_TOKEN:-}}"
-SONAR_PASS=""
-if [ -z "$SONAR_TOKEN" ]; then
-  if kubectl get secret sonarqube-admin-credentials -n sonarqube >/dev/null 2>&1; then
-    SONAR_PASS="$(kubectl get secret sonarqube-admin-credentials -n sonarqube -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "")"
-    if [ -z "$SONAR_PASS" ]; then
-      SONAR_PASS="$(kubectl get secret sonarqube-admin-credentials -n sonarqube -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d || echo "")"
-    fi
-  fi
-  if [ -z "$SONAR_PASS" ]; then
-    SONAR_PASS="${SONAR_ADMIN_PASSWORD:-${SONARQUBE_ADMIN_PASSWORD:-}}"
-  fi
-  if [ -z "$SONAR_PASS" ]; then
-    SONAR_PASS="admin"
-  fi
-fi
-
-if [ -n "$SONAR_TOKEN" ]; then
-  CURL_AUTH_CFG="header = \"Authorization: Bearer $SONAR_TOKEN\""
-else
-  CURL_AUTH_CFG="user = \"admin:$SONAR_PASS\""
-fi
+CURL_AUTH_CFG="header = \"Authorization: Bearer $SONAR_TOKEN\""
+echo "Using the approved SonarQube API token for webhook configuration."
 
 echo "Configuring SonarQube Quality Gate webhook for Jenkins (idempotent & verified)..."
 WEBHOOK_SUCCESS=false
@@ -636,14 +658,19 @@ EOF
     terraform -chdir="$TF_DIR" plan -input=false -var="cluster_endpoint_public_access_cidrs=[\"$OP_CIDR\"]" -out="$TF_DIR/lambda-reconcile.tfplan"
     terraform -chdir="$TF_DIR" apply "$TF_DIR/lambda-reconcile.tfplan"
     rm -f "$TF_DIR/lambda-reconcile.tfplan"
-    echo "AWS Lambda synthetic monitoring successfully activated and reconciled."
+    aws lambda get-function --function-name "${CLUSTER}-synthetic-health-check" --region "$REGION" >/dev/null || {
+      echo "ERROR: Lambda apply finished but the expected synthetic monitoring function was not verified." >&2
+      exit 1
+    }
+    echo "AWS Lambda synthetic monitoring successfully deployed and independently verified."
   else
-    echo "WARNING: Public health endpoints not yet answering HTTPS. Lambda monitoring kept disabled to prevent false alarms."
-    rm -f "$TF_DIR/lambda.auto.tfvars"
+    echo "ERROR: Public HTTPS health endpoints unavailable; required synthetic monitoring cannot be verified." >&2
+    echo "Terraform Lambda desired configuration is preserved; investigate DNS/ACM/Ingress before retrying." >&2
+    exit 1
   fi
 else
   echo "Lambda Synthetic Monitoring: Disabled (public HTTPS domain and ACM certificate required)."
-  rm -f "$TF_DIR/lambda.auto.tfvars"
+  echo "Existing Lambda Terraform configuration is preserved; no implicit disable or destroy."
 fi
 
 # Step 23: Complete Platform Component Readiness Verification (Issue 9)

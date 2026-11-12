@@ -6,9 +6,9 @@ metadata:
     {{- include "votex.labels" . | nindent 4 }}
     app: vote
 spec:
-  {{- if not .Values.vote.autoscaling.enabled }}
+{{- if not .Values.vote.autoscaling.enabled }}
   replicas: {{ .Values.vote.replicaCount }}
-  {{- end }}
+{{- end }}
   strategy:
     type: RollingUpdate
     rollingUpdate:

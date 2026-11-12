@@ -59,9 +59,8 @@ inspect_service() {
 
   # Check if service exists
   local svc_json
-  svc_json="$(kubectl get service "$svc" -n "$ns" -o json 2>/dev/null || echo "")"
-  if [ -z "$svc_json" ]; then
-    echo "  Status:         Not Deployed (service '$ns/$svc' not found)"
+  if ! svc_json="$(kubectl get service "$svc" -n "$ns" -o json 2>/dev/null)"; then
+    echo "  Status:         Unverified (service missing or Kubernetes API access denied)"
     echo "  Expected Host:  https://$expected_host$default_path"
     echo "  Discovered URL: None"
     echo "  Availability:   Service not present in cluster"
@@ -76,7 +75,7 @@ inspect_service() {
   selector_arg="$(python3 -c "
 import json, sys
 try:
-    data = json.loads('''$svc_json''')
+    data = json.loads(sys.argv[1])
     selectors = data.get('spec', {}).get('selector', {})
     if selectors:
         print(','.join(f'{k}={v}' for k, v in selectors.items()))
@@ -84,13 +83,19 @@ try:
         print('')
 except Exception:
     print('')
-" 2>/dev/null || echo "")"
+" "$svc_json" 2>/dev/null || echo "")"
 
   local pods_json
   if [ -n "$selector_arg" ]; then
-    pods_json="$(kubectl get pods -n "$ns" -l "$selector_arg" -o json 2>/dev/null || echo "")"
+    if ! pods_json="$(kubectl get pods -n "$ns" -l "$selector_arg" -o json 2>/dev/null)"; then
+      echo "  Status:         Unverified (pod discovery failed; check API permissions)"
+      return
+    fi
   else
-    pods_json="$(kubectl get pods -n "$ns" -l "app=$svc" -o json 2>/dev/null || echo "")"
+    if ! pods_json="$(kubectl get pods -n "$ns" -l "app=$svc" -o json 2>/dev/null)"; then
+      echo "  Status:         Unverified (pod discovery failed; check API permissions)"
+      return
+    fi
   fi
 
   # Parse pod counts strictly via Python (avoids grep -c double-zero bug)
@@ -98,7 +103,7 @@ except Exception:
   counts="$(python3 -c "
 import json, sys
 try:
-    data = json.loads('''$pods_json''') if '''$pods_json'''.strip() else {}
+    data = json.loads(sys.argv[1]) if sys.argv[1].strip() else {}
     items = data.get('items', [])
     total = len(items)
     ready = 0
@@ -111,7 +116,7 @@ try:
     print(f'{ready} {total}')
 except Exception:
     print('0 0')
-" 2>/dev/null || echo "0 0")"
+" "$pods_json" 2>/dev/null || echo "0 0")"
 
   local ready_count total_count
   read -r ready_count total_count <<< "$counts"
@@ -130,15 +135,18 @@ except Exception:
   local alb_host=""
   local ing_host=""
   local ingress_json
-  ingress_json="$(kubectl get ingress -n "$ns" -o json 2>/dev/null || echo "")"
+  if ! ingress_json="$(kubectl get ingress -n "$ns" -o json 2>/dev/null)"; then
+    echo "  Ingress:        Unverified (Kubernetes API unavailable or access denied)"
+    return
+  fi
 
   if [ -n "$ingress_json" ] && [ "$ingress_json" != "{}" ]; then
     local address
     address="$(python3 -c "
 import json, sys
-svc = '$svc'
+svc = sys.argv[1]
 try:
-    data = json.loads('''$ingress_json''')
+    data = json.loads(sys.argv[2])
     for ing in data.get('items', []):
         lb_list = ing.get('status', {}).get('loadBalancer', {}).get('ingress', []) or [{}]
         alb = lb_list[0].get('hostname') or lb_list[0].get('ip') or ''
@@ -152,7 +160,7 @@ try:
                     sys.exit(0)
 except Exception:
     pass
-" 2>/dev/null || echo "")"
+" "$svc" "$ingress_json" 2>/dev/null || echo "")"
 
     if [ -n "$address" ]; then
       IFS='|' read -r ing_host alb_host <<< "$address"
@@ -173,9 +181,16 @@ except Exception:
   local availability="Internal service (ClusterIP)"
   if [[ "$discovered_url" =~ ^https:// && "$discovered_url" != *"pending"* && "$discovered_url" != *"Placeholder"* ]]; then
     local test_url="https://$ing_host$default_path"
-    if curl -s -f --connect-timeout 2 -o /dev/null "$test_url" 2>/dev/null; then
-      availability="Verified Online (HTTP 200 OK, Valid TLS)"
-      missing_prereq="None"
+    PROBE_CODE="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 2 --max-time 8 "$test_url" 2>/dev/null)" || PROBE_CODE="000"
+    if [ "$PROBE_CODE" = "200" ] || [ "$PROBE_CODE" = "204" ]; then
+      availability="HTTPS reachable (HTTP $PROBE_CODE, valid TLS; login not verified)"
+      missing_prereq="Verify authenticated access separately"
+    elif [ "$PROBE_CODE" = "301" ] || [ "$PROBE_CODE" = "302" ] || [ "$PROBE_CODE" = "303" ] || [ "$PROBE_CODE" = "307" ] || [ "$PROBE_CODE" = "308" ]; then
+      availability="HTTPS responding with redirect (HTTP $PROBE_CODE, valid TLS; destination not verified)"
+      missing_prereq="Verify redirect destination and login separately"
+    elif [ "$PROBE_CODE" = "401" ] || [ "$PROBE_CODE" = "403" ]; then
+      availability="HTTPS reachable, authentication or access restriction enforced (HTTP $PROBE_CODE)"
+      missing_prereq="Authenticate using approved credentials"
     else
       if curl -s -k -f --connect-timeout 2 -o /dev/null "$test_url" 2>/dev/null; then
         availability="Warning: Responding but Invalid / Untrusted TLS Certificate"
@@ -228,7 +243,7 @@ inspect_service \
   "sonarqube" "sonarqube" \
   "sonarqube.votex.domain.tld" "/dashboard?id=votex-platform" \
   "admin" \
-  "Default initial password 'admin' (forced change upon first web login)."
+  "Rotate SonarQube's first-run password and generate the administrator API token; do not use default credentials."
 
 # 5. Grafana Observability Dashboards
 inspect_service \
@@ -262,7 +277,7 @@ LAMBDA_STATUS="Disabled (Enablement requires public HTTPS domain & ACM certifica
 TF_STATE="$ROOT_DIR/terraform/terraform.tfstate"
 LAMBDA_VARS="$ROOT_DIR/terraform/lambda.auto.tfvars"
 if [ -f "$LAMBDA_VARS" ] && grep -q 'enable_health_check_lambda = true' "$LAMBDA_VARS" 2>/dev/null; then
-  LAMBDA_STATUS="Active / Configured (Reconciled via lambda.auto.tfvars)"
+  LAMBDA_STATUS="Desired in local Terraform config; AWS deployment not verified"
 elif [ -f "$TF_STATE" ]; then
   HAS_LAMBDA="$(python3 -c "
 import json
@@ -279,7 +294,7 @@ except Exception:
     print('no')
 " 2>/dev/null || echo "no")"
   if [ "$HAS_LAMBDA" = "yes" ]; then
-    LAMBDA_STATUS="Active / Deployed"
+    LAMBDA_STATUS="Recorded in local Terraform state; live AWS status not verified"
   fi
 fi
 
