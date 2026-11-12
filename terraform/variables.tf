@@ -85,10 +85,12 @@ variable "result_health_url" {
 variable "cluster_endpoint_public_access_cidrs" {
   description = "List of approved CIDR blocks permitted to communicate with the EKS public API endpoint (e.g. operator workstation public IP '/32'). Avoids unrestricted 0.0.0.0/0 exposure."
   type        = list(string)
-  default     = ["10.0.0.0/16"]
+  default     = []
 
   validation {
-    condition     = length(var.cluster_endpoint_public_access_cidrs) > 0 && !contains(var.cluster_endpoint_public_access_cidrs, "0.0.0.0/0")
-    error_message = "The EKS public API endpoint must be restricted to approved operator CIDRs (e.g. ['<OPERATOR_IP>/32']). Unrestricted exposure ('0.0.0.0/0') is prohibited."
+    condition = length(var.cluster_endpoint_public_access_cidrs) > 0 && alltrue([
+      for cidr in var.cluster_endpoint_public_access_cidrs : can(cidrhost(cidr, 0)) && cidr != "0.0.0.0/0"
+    ])
+    error_message = "Set cluster_endpoint_public_access_cidrs explicitly to valid approved operator CIDRs (e.g. YOUR_IP/32); 0.0.0.0/0 is prohibited."
   }
 }

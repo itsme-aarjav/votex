@@ -1,58 +1,66 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-echo "Fetching service endpoints..."
+if ! command -v kubectl >/dev/null 2>&1; then
+  echo "kubectl is unavailable. Service endpoints require a deployed cluster."
+  exit 0
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "python3 is required to inspect Ingress service routing." >&2
+  exit 1
+fi
+if ! kubectl cluster-info >/dev/null 2>&1; then
+  echo "No accessible Kubernetes cluster. Online endpoints remain pending deployment."
+  exit 0
+fi
 
-format_endpoint() {
-  local ns="$1"
-  local svc="$2"
-  local path_suffix="$3"
-  local local_port="$4"
-
-  if ! kubectl get svc "$svc" -n "$ns" >/dev/null 2>&1; then
-    echo "not deployed (pending cluster deployment in Option B)"
+endpoint() {
+  local ns="$1" svc="$2" path="$3"
+  local ingress_json address host alb svc_type svc_port
+  if ! kubectl get service "$svc" -n "$ns" >/dev/null 2>&1; then
+    echo "not deployed (service $ns/$svc missing or inaccessible)"
     return
   fi
-
-  # Check if an Ingress rule exists for this service with online hostname
-  local ing_host
-  ing_host=$(kubectl get ingress -n "$ns" -o jsonpath="{.items[?(@.spec.rules[*].http.paths[*].backend.service.name=='$svc')].spec.rules[0].host}" 2>/dev/null || echo "")
-  local alb_host
-  alb_host=$(kubectl get ingress -n "$ns" -o jsonpath='{.items[0].status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-
-  if [ -n "$ing_host" ]; then
-    echo "https://${ing_host}${path_suffix} (ALB Ingress: ${alb_host:-pending DNS})"
+  if ! ingress_json="$(kubectl get ingress -n "$ns" -o json 2>/dev/null)"; then
+    echo "Ingress status unavailable (check namespace access)"
     return
   fi
-
-  local svc_type
-  svc_type=$(kubectl get svc "$svc" -n "$ns" -o jsonpath='{.spec.type}' 2>/dev/null || echo "ClusterIP")
-  local svc_port
-  svc_port=$(kubectl get svc "$svc" -n "$ns" -o jsonpath='{.spec.ports[0].port}' 2>/dev/null || echo "$local_port")
-
-  if [ "$svc_type" = "LoadBalancer" ]; then
-    local host
-    host=$(kubectl get svc "$svc" -n "$ns" -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "")
-    if [ -z "$host" ]; then
-      host=$(kubectl get svc "$svc" -n "$ns" -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
-    fi
-    if [ -z "$host" ]; then
-      echo "pending (LoadBalancer provisioning)"
+  address="$(printf '%s' "$ingress_json" | python3 -c '
+import json, sys
+service = sys.argv[1]
+for ing in json.load(sys.stdin).get("items", []):
+    lb = (ing.get("status", {}).get("loadBalancer", {}).get("ingress", []) or [{}])[0]
+    for rule in ing.get("spec", {}).get("rules", []):
+        paths = rule.get("http", {}).get("paths", [])
+        if any(p.get("backend", {}).get("service", {}).get("name") == service for p in paths):
+            print("{}|{}".format(rule.get("host", ""), lb.get("hostname") or lb.get("ip") or ""))
+            sys.exit(0)
+' "$svc")" || { echo "Unable to parse Ingress routing"; return; }
+  IFS='|' read -r host alb <<< "$address"
+  if [ -n "$host" ]; then
+    if [[ "$host" == *domain.tld* || "$host" == *example.com* ]]; then
+      echo "placeholder hostname ($host) — DNS/ACM not configured"
+    elif [ -z "$alb" ]; then
+      echo "https://$host$path (Ingress configured; ALB pending)"
     else
-      echo "https://${host}${path_suffix}"
+      echo "https://$host$path (ALB: $alb; DNS/TLS not verified)"
     fi
+    return
+  fi
+  svc_type="$(kubectl get service "$svc" -n "$ns" -o jsonpath='{.spec.type}')"
+  svc_port="$(kubectl get service "$svc" -n "$ns" -o jsonpath='{.spec.ports[0].port}')"
+  if [ "$svc_type" = "LoadBalancer" ]; then
+    echo "LoadBalancer service $ns/$svc:$svc_port (confirm endpoint scheme and TLS separately)"
   else
-    echo "ClusterIP (Internal private: http://${svc}.${ns}.svc.cluster.local:${svc_port}${path_suffix} | Online HTTPS requires Ingress/ALB with custom domain & ACM certificate)"
+    echo "internal-only: http://$svc.$ns.svc.cluster.local:$svc_port$path (public HTTPS pending)"
   fi
 }
 
-echo ""
-echo "Votex Service Endpoints:"
-echo "  Vote UI:         $(format_endpoint votex vote "" 5000)"
-echo "  Result UI:       $(format_endpoint votex result "" 4000)"
-echo "  Jenkins:         $(format_endpoint jenkins jenkins ":8080/job/Votex-CICD/" 8080)"
-echo "  GitHub Webhook:  $(format_endpoint jenkins jenkins ":8080/github-webhook/" 8080)"
-echo "  SonarQube:       $(format_endpoint sonarqube sonarqube ":9000/dashboard?id=votex-platform" 9000)"
-echo "  Grafana:         $(format_endpoint monitoring prometheus-grafana "" 3000)"
-echo "  Prometheus:      $(format_endpoint monitoring prometheus-kube-prometheus-prometheus ":9090" 9090)"
-echo ""
+echo "Votex service endpoints (inspection only; no deployment or port forwards)"
+echo "  Vote UI:    $(endpoint votex vote /)"
+echo "  Result UI:  $(endpoint votex result /)"
+echo "  Jenkins:    $(endpoint jenkins jenkins /)"
+echo "  SonarQube:  $(endpoint sonarqube sonarqube '/dashboard?id=votex-platform')"
+echo "  Grafana:    $(endpoint monitoring prometheus-grafana /)"
+echo "  Prometheus: $(endpoint monitoring prometheus-kube-prometheus-prometheus /)"
+echo "  GitHub webhook: not configured (Jenkins uses SCM polling)"

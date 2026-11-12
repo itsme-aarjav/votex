@@ -3,7 +3,7 @@
 # Systematically decommissions Kubernetes releases, storage volumes, and cloud infrastructure.
 # Safely preserves the Terraform S3 remote state bucket and offline diagnostic evidence.
 
-set -eo pipefail
+set -euo pipefail
 
 REGION="${AWS_REGION:-eu-north-1}"
 CLUSTER="${CLUSTER_NAME:-votex-cluster}"
@@ -28,13 +28,15 @@ if [ -z "$CURRENT_ACCOUNT" ]; then
 fi
 echo "AWS Account ID:     $CURRENT_ACCOUNT"
 
-if [ -n "${EXPECTED_AWS_ACCOUNT_ID:-}" ]; then
-  if [ "$CURRENT_ACCOUNT" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
-    echo "ERROR: Current AWS account '$CURRENT_ACCOUNT' does not match expected account '$EXPECTED_AWS_ACCOUNT_ID'. Aborting teardown." >&2
-    exit 1
-  fi
-  echo "Verified expected AWS Account: $EXPECTED_AWS_ACCOUNT_ID"
+if [[ ! "${EXPECTED_AWS_ACCOUNT_ID:-}" =~ ^[0-9]{12}$ ]]; then
+  echo "ERROR: Set mandatory EXPECTED_AWS_ACCOUNT_ID to your intended AWS account." >&2
+  exit 1
 fi
+if [ "$CURRENT_ACCOUNT" != "$EXPECTED_AWS_ACCOUNT_ID" ]; then
+  echo "ERROR: AWS caller account does not match EXPECTED_AWS_ACCOUNT_ID." >&2
+  exit 1
+fi
+echo "Verified expected AWS account: $EXPECTED_AWS_ACCOUNT_ID"
 
 if ! command -v kubectl >/dev/null 2>&1; then
   echo "ERROR: kubectl CLI is required but not found in PATH. Aborting teardown." >&2
@@ -61,6 +63,53 @@ if [[ ! "$CURRENT_CONTEXT" =~ "$CLUSTER" ]]; then
     exit 1
   fi
 fi
+
+# Verify exact EKS identity and initialized S3 backend before deleting anything
+EKS_ARN="$(aws eks describe-cluster --region "$REGION" --name "$CLUSTER" --query 'cluster.arn' --output text)" ||
+  { echo "ERROR: Unable to verify EKS cluster identity." >&2; exit 1; }
+EXPECTED_EKS_ARN="arn:aws:eks:${REGION}:${EXPECTED_AWS_ACCOUNT_ID}:cluster/${CLUSTER}"
+if [ "$EKS_ARN" != "$EXPECTED_EKS_ARN" ]; then
+  echo "ERROR: AWS region, account or EKS cluster mismatch." >&2
+  exit 1
+fi
+AWS_ENDPOINT="$(aws eks describe-cluster --region "$REGION" --name "$CLUSTER" --query 'cluster.endpoint' --output text)" ||
+  { echo "ERROR: Cannot retrieve EKS endpoint." >&2; exit 1; }
+KUBE_ENDPOINT="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')" ||
+  { echo "ERROR: Cannot read active kubeconfig endpoint." >&2; exit 1; }
+if [ -z "$AWS_ENDPOINT" ] || [ "$AWS_ENDPOINT" != "$KUBE_ENDPOINT" ]; then
+  echo "ERROR: kubectl context does not point to the verified EKS endpoint." >&2
+  exit 1
+fi
+command -v python3 >/dev/null 2>&1 || { echo "ERROR: python3 required to validate state backend." >&2; exit 1; }
+BACKEND_META="$ROOT_DIR/terraform/.terraform/terraform.tfstate"
+if [ ! -f "$BACKEND_META" ]; then
+  echo "ERROR: Initialized Terraform S3 backend metadata missing." >&2
+  exit 1
+fi
+STATE_BUCKET="$(python3 - "$BACKEND_META" <<'PY'
+import json
+import sys
+try:
+    with open(sys.argv[1]) as f:
+        backend = json.load(f).get("backend") or {}
+    config = backend.get("config") or {}
+    bucket = config.get("bucket")
+    if backend.get("type") != "s3" or not bucket or config.get("use_lockfile") is not True:
+        raise ValueError("S3 bucket/native locking missing")
+    print(bucket)
+except Exception as error:
+    print(f"Invalid backend metadata: {error}", file=sys.stderr)
+    sys.exit(1)
+PY
+)" || exit 1
+aws s3api head-bucket --bucket "$STATE_BUCKET" >/dev/null ||
+  { echo "ERROR: Remote state bucket not accessible." >&2; exit 1; }
+terraform -chdir="$ROOT_DIR/terraform" state list >/dev/null ||
+  { echo "ERROR: Cannot inspect Terraform remote state." >&2; exit 1; }
+kubectl cluster-info >/dev/null ||
+  { echo "ERROR: Target Kubernetes API is unreachable." >&2; exit 1; }
+helm list -A >/dev/null ||
+  { echo "ERROR: Cannot inspect Helm releases in target cluster." >&2; exit 1; }
 
 echo ""
 echo "WARNING: This action will systematically decommission Votex-owned"
@@ -89,37 +138,59 @@ fi
 echo "[2/8] Terminating local port-forward tunnels..."
 pkill -f "kubectl port-forward.*(vote|result|jenkins|sonarqube|grafana|prometheus)" 2>/dev/null || true
 
-# Step 3: Delete Ingresses to trigger AWS Load Balancer Controller deprovisioning
-echo "[3/8] Removing Votex Kubernetes Ingress resources to trigger ALB deprovisioning..."
-if kubectl cluster-info >/dev/null 2>&1; then
-  kubectl delete ingress -n votex votex-ingress --ignore-not-found 2>/dev/null || true
-  kubectl delete ingress -n jenkins jenkins-ingress --ignore-not-found 2>/dev/null || true
-  kubectl delete ingress -n sonarqube sonarqube-ingress --ignore-not-found 2>/dev/null || true
-  kubectl delete ingress -n monitoring grafana-ingress --ignore-not-found 2>/dev/null || true
+# Step 3: Delete exact project Ingresses, never shared namespaces
+echo "[3/8] Removing project Ingress resources..."
+NAMESPACES="$(kubectl get namespaces -o jsonpath='{.items[*].metadata.name}')"
+has_namespace() { [[ " $NAMESPACES " == *" $1 "* ]]; }
+if has_namespace votex; then
+  kubectl delete ingress/votex-ingress -n votex --ignore-not-found
+fi
+if has_namespace jenkins; then
+  kubectl delete ingress/jenkins-ingress -n jenkins --ignore-not-found
+fi
+if has_namespace sonarqube; then
+  kubectl delete ingress/sonarqube-ingress -n sonarqube --ignore-not-found
+fi
+if has_namespace monitoring; then
+  kubectl delete ingress/grafana-ingress -n monitoring --ignore-not-found
 fi
 
-# Step 4: Delete Helm releases and workload manifests
-echo "[4/8] Decommissioning application, monitoring, and CI/CD workloads..."
-if command -v helm >/dev/null 2>&1 && kubectl cluster-info >/dev/null 2>&1; then
-  helm uninstall votex -n votex 2>/dev/null || true
-  helm uninstall prometheus -n monitoring 2>/dev/null || true
-  helm uninstall loki -n monitoring 2>/dev/null || true
-  helm uninstall alloy -n monitoring 2>/dev/null || true
+# Step 4: Uninstall only project-owned releases and workloads
+echo "[4/8] Removing Votex, CI/CD and observability workloads..."
+for spec in "votex:votex" "prometheus:monitoring" "loki:monitoring" "alloy:monitoring"; do
+  release="${spec%%:*}"
+  ns="${spec#*:}"
+  if has_namespace "$ns" && helm status "$release" -n "$ns" >/dev/null 2>&1; then
+    helm uninstall "$release" -n "$ns"
+  fi
+done
+if has_namespace jenkins; then
+  kubectl delete deployment/jenkins service/jenkins serviceaccount/jenkins \
+    role/jenkins-agent-role rolebinding/jenkins-agent-binding -n jenkins --ignore-not-found
+fi
+if has_namespace votex; then
+  kubectl delete role/jenkins-deployer-role rolebinding/jenkins-deployer-binding -n votex --ignore-not-found
+fi
+kubectl delete clusterrole/jenkins-cluster-viewer \
+  clusterrolebinding/jenkins-cluster-viewer-binding --ignore-not-found
+if has_namespace sonarqube; then
+  kubectl delete deployment/sonarqube service/sonarqube -n sonarqube --ignore-not-found
 fi
 
-if kubectl cluster-info >/dev/null 2>&1; then
-  kubectl delete -f "$ROOT_DIR/jenkins/jenkins.yaml" --ignore-not-found 2>/dev/null || true
-  kubectl delete -f "$ROOT_DIR/sonarqube/sonarqube.yaml" --ignore-not-found 2>/dev/null || true
+# Step 5: Remove exact project PVCs and release-owned monitoring PVCs
+echo "[5/8] Releasing Votex PVCs..."
+if has_namespace votex; then
+  kubectl delete pvc/votex-db-pvc pvc/votex-redis-pvc -n votex --ignore-not-found
 fi
-
-# Step 5: Delete specific PVCs to detach and release AWS EBS storage volumes
-echo "[5/8] Releasing Votex Persistent Volume Claims..."
-if kubectl cluster-info >/dev/null 2>&1; then
-  kubectl delete pvc -n votex votex-db-pvc votex-redis-pvc --ignore-not-found 2>/dev/null || true
-  kubectl delete pvc -n jenkins jenkins-pvc --ignore-not-found 2>/dev/null || true
-  kubectl delete pvc -n sonarqube sonarqube-data-pvc --ignore-not-found 2>/dev/null || true
-  kubectl delete pvc -n monitoring data-loki-0 --ignore-not-found 2>/dev/null || true
-  kubectl delete pvc -n monitoring -l app.kubernetes.io/instance=prometheus --ignore-not-found 2>/dev/null || true
+if has_namespace jenkins; then
+  kubectl delete pvc/jenkins-pvc -n jenkins --ignore-not-found
+fi
+if has_namespace sonarqube; then
+  kubectl delete pvc/sonarqube-data-pvc -n sonarqube --ignore-not-found
+fi
+if has_namespace monitoring; then
+  kubectl delete pvc -n monitoring -l 'app.kubernetes.io/instance=loki,app.kubernetes.io/name=loki' --ignore-not-found
+  kubectl delete pvc -n monitoring -l 'app.kubernetes.io/instance=prometheus' --ignore-not-found
 fi
 
 # Step 6: Wait for AWS Application Load Balancers (ELBv2) to release
@@ -144,8 +215,8 @@ if command -v aws >/dev/null 2>&1; then
       for alb_arn in $ACTIVE_ALB_OUTPUT; do
         IS_VOTEX=$(aws elbv2 describe-tags --region "$REGION" --resource-arns "$alb_arn" \
           --query "TagDescriptions[0].Tags[?Key=='ingress.k8s.aws/stack' && Value=='votex-platform'].Value" \
-          --output text 2>/dev/null || echo "")
-        if [ -n "$IS_VOTEX" ]; then
+          --output text) || { echo "ERROR: ALB ownership lookup failed." >&2; exit 1; }
+        if [ "$IS_VOTEX" = "votex-platform" ]; then
           VOTEX_ALBS="$VOTEX_ALBS $alb_arn"
         fi
       done
@@ -174,7 +245,8 @@ echo "Generating Terraform destroy plan for operator inspection..."
 terraform plan -destroy -out="$EVIDENCE_DIR/destroy.tfplan"
 echo ""
 echo "Destruction plan written to: $EVIDENCE_DIR/destroy.tfplan"
-echo "Review the planned AWS resource terminations above."
+terraform show -no-color "$EVIDENCE_DIR/destroy.tfplan"
+echo "Review the exact Terraform resource terminations above."
 read -r -p "Type 'confirm-terraform-destroy' to execute destruction: " TF_CONFIRM
 if [ "$TF_CONFIRM" != "confirm-terraform-destroy" ]; then
   echo "Terraform destroy aborted by operator. Core infrastructure preserved."
@@ -182,48 +254,29 @@ if [ "$TF_CONFIRM" != "confirm-terraform-destroy" ]; then
 fi
 terraform apply "$EVIDENCE_DIR/destroy.tfplan"
 
-# Step 8: Post-teardown verification of remaining cloud resources
+# Step 8: Audit AWS resources without converting access errors into "None"
 echo "[8/8] Auditing remaining cloud resources in $REGION..."
-if command -v aws >/dev/null 2>&1; then
-  echo "Running EC2 Instances:"
-  aws ec2 describe-instances --region "$REGION" \
-    --filters "Name=instance-state-name,Values=running" \
-    --query "Reservations[].Instances[].InstanceId" --output text 2>/dev/null || echo "None"
-
-  echo "Active NAT Gateways:"
-  aws ec2 describe-nat-gateways --region "$REGION" \
-    --filter "Name=state,Values=available,pending" \
-    --query "NatGateways[].NatGatewayId" --output text 2>/dev/null || echo "None"
-
-  echo "Active Application/Network Load Balancers (ELBv2):"
-  aws elbv2 describe-load-balancers --region "$REGION" \
-    --query "LoadBalancers[].LoadBalancerName" --output text 2>/dev/null || echo "None"
-
-  echo "Active Classic Load Balancers (ELBv1):"
-  aws elb describe-load-balancers --region "$REGION" \
-    --query "LoadBalancerDescriptions[].LoadBalancerName" --output text 2>/dev/null || echo "None"
-
-  echo "Active EBS Volumes (in-use or available):"
-  aws ec2 describe-volumes --region "$REGION" \
-    --filters "Name=status,Values=available,in-use" \
-    --query "Volumes[].VolumeId" --output text 2>/dev/null || echo "None"
-
-  STATE_BUCKET=""
-  if [ -f "$ROOT_DIR/terraform/backend.tf" ]; then
-    STATE_BUCKET=$(grep -E '^\s*bucket\s*=' "$ROOT_DIR/terraform/backend.tf" 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo "")
-  fi
-  if [ -z "$STATE_BUCKET" ] && [ -f "$ROOT_DIR/terraform/backend.tf.example" ]; then
-    STATE_BUCKET="$(grep -E '^\s*bucket\s*=' "$ROOT_DIR/terraform/backend.tf.example" 2>/dev/null | cut -d'=' -f2 | tr -d ' "' || echo '') (template)"
-  fi
-  echo ""
-  echo "Remote State Protection Audit:"
-  if [ -n "$STATE_BUCKET" ]; then
-    echo "- S3 Remote State Bucket ($STATE_BUCKET): PRESERVED (Native S3 locking enabled, not deleted)"
-  else
-    echo "- S3 Remote State Bucket: No backend.tf file found. Any local state preserved."
-  fi
-fi
+audit_aws() {
+  local label="$1"
+  shift
+  echo "$label"
+  "$@" || { echo "ERROR: AWS audit failed for $label; teardown cannot be certified." >&2; exit 1; }
+}
+audit_aws "Running EC2 instances:" aws ec2 describe-instances --region "$REGION" \
+  --filters "Name=instance-state-name,Values=running" \
+  --query "Reservations[].Instances[].InstanceId" --output text
+audit_aws "Active NAT Gateways:" aws ec2 describe-nat-gateways --region "$REGION" \
+  --filter "Name=state,Values=available,pending" --query "NatGateways[].NatGatewayId" --output text
+audit_aws "Application/Network Load Balancers:" aws elbv2 describe-load-balancers --region "$REGION" \
+  --query "LoadBalancers[].LoadBalancerName" --output text
+audit_aws "Classic Load Balancers:" aws elb describe-load-balancers --region "$REGION" \
+  --query "LoadBalancerDescriptions[].LoadBalancerName" --output text
+audit_aws "EBS volumes:" aws ec2 describe-volumes --region "$REGION" \
+  --filters "Name=status,Values=available,in-use" --query "Volumes[].VolumeId" --output text
+aws s3api head-bucket --bucket "$STATE_BUCKET" >/dev/null ||
+  { echo "ERROR: Preserved S3 state bucket is inaccessible." >&2; exit 1; }
+echo "Preserved remote S3 state bucket verified: $STATE_BUCKET"
 
 echo ""
-echo "Safe teardown and verification complete."
+echo "Teardown commands finished; inspect remaining project-owned resources before claiming zero residual charges."
 echo "Diagnostic evidence retained in: $EVIDENCE_DIR"

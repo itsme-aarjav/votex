@@ -11,6 +11,8 @@ node_modules/
 .DS_Store
 
 # Terraform
+*.tfplan
+tfplan
 .terraform/
 *.tfstate
 *.tfstate.*

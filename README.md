@@ -74,7 +74,7 @@ Every commit to `main` executes an automated, 9-stage declarative Jenkins pipeli
 | **6** | **Trivy Image Scan** | Trivy CLI | Container vulnerability scanner. Evaluates OS base layers and binary packages in built release candidate images before publication. Blocks on `CRITICAL` CVEs. |
 | **7** | **OWASP ZAP DAST** | OWASP ZAP container | Dynamic Application Security Testing (DAST). Boots candidate release in an isolated Docker network and performs active baseline security scans against live HTTP endpoints. |
 | **8** | **Docker Hub Publish** | Docker CLI, Credential Store | Authenticates and publishes verified immutable release tags (`v2.1.${BUILD_NUMBER}-${SHA}`) to Docker Hub (`aarjavjainn`). |
-| **9** | **EKS Deployment & Verification** | Helm 3, Kubectl, Ansible | Deploys release Helm chart to EKS cluster with atomic rollback (`--atomic`), verifies deployment rollout status, and runs Ansible post-deployment health verification. |
+| **9** | **EKS Deployment & Verification** | Helm 3/4, kubectl, Ansible | Selects version-compatible rollback behavior; verifies rollout and Ansible checks, and tests restoring the previously deployed revision on post-deploy failure. Live proof pending. |
 
 > [!NOTE]
 > Detailed application unit and integration suites (`votex/tests/`, `votex/result/tests/`) remain local-only on the developer's workstation for rapid iteration. CI Stage 2 executes standalone syntax, import, and process smoke checks, ensuring deterministic, hermetic pipeline builds on clean repository checkouts.
@@ -212,6 +212,12 @@ To avoid the circular dependency where an EKS stack attempts to manage the bucke
 
 ---
 
+### Operations helpers (`ops/`)
+
+- `bash ops/dashboard.sh`: read-only display of Vote, Result, Jenkins, SonarQube, Grafana and Prometheus service endpoints. It does not validate public TLS or configure DNS.
+- `bash ops/deploy.sh` (default `--offline`): Terraform formatting, backend-disabled initialization and validation only. It does **not** create infrastructure. `--plan` explicitly enables a read-only, AWS-backed speculative plan once the S3 backend has been configured.
+- `bash ops/destroy.sh`: **destructive** teardown workflow. Requires the exact `EXPECTED_AWS_ACCOUNT_ID`, EKS and initialized backend checks and two human confirmations. Never run during offline checks.
+
 ## 7. Safe Teardown (`ops/destroy.sh`)
 
 To eliminate lingering AWS costs after live demonstrations, `ops/destroy.sh` executes a strict, ordered decommissioning sequence:
@@ -219,11 +225,11 @@ To eliminate lingering AWS costs after live demonstrations, `ops/destroy.sh` exe
 1. **Pre-teardown Diagnostics**: Captures cluster pod logs and configuration to `reports/teardown-<timestamp>/`.
 2. **Ingress Deletion**: Deletes Kubernetes Ingress objects, triggering AWS Load Balancer Controller to deprovision the Application Load Balancer.
 3. **Workload & Helm Uninstallation**: Systematically removes Votex, Prometheus, Loki, Alloy, Jenkins, and SonarQube.
-4. **Storage Volume Release**: Purges PVCs across all namespaces, allowing AWS EBS volumes to unmount and delete cleanly.
+4. **Storage Volume Release**: Deletes specific Votex PVCs and release-labeled monitoring claims without deleting shared namespaces.
 5. **ELBv2 Verification**: Polls the AWS ELBv2 API (`aws elbv2 describe-load-balancers`) to confirm the ALB is fully deleted before tearing down network subnets.
 6. **Terraform Infrastructure Destruction**: Plans and applies `terraform plan -destroy` after explicit operator confirmation (`confirm-terraform-destroy`).
 7. **S3 State Preservation**: The S3 remote state bucket is strictly preserved to maintain audit trails and configuration state.
-8. **Cloud Audit**: Audits the AWS region for lingering EC2 instances, NAT Gateways, ELBs, and EBS volumes to guarantee zero unexpected charges.
+8. **Cloud Audit**: Inspects remaining cloud resources for project-specific leftovers; zero charges must not be assumed from an account-wide listing.
 
 ---
 
@@ -255,7 +261,7 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
 1. **AWS Identity & Cost Preflight**: Authenticate AWS CLI, verify target account and region (`eu-north-1`), and review the ~$296.89/mo estimated continuous spend.
 2. **S3 Remote State Bootstrap**: Provision the dedicated S3 state bucket once via `cd terraform/bootstrap && terraform init && terraform apply -var="state_bucket_name=votex-tfstate-<ACCOUNT_ID>-eu-north-1"`.
 3. **Terraform Backend Initialization**: Configure `terraform/backend.tf` with the provisioned bucket and initialize with `terraform init -backend-config="bucket=votex-tfstate-<ACCOUNT_ID>-eu-north-1"`.
-4. **EKS Provisioning**: Apply infrastructure with `terraform apply -var-file=terraform.tfvars`. Deploys custom VPC, subnets, NAT Gateway, and 2 × `m7i-flex.large` nodes.
+4. **EKS Provisioning**: Copy `terraform/terraform.tfvars.example` to an ignored `terraform.tfvars`, set your actual approved operator public CIDR in `cluster_endpoint_public_access_cidrs`, and review a full Terraform plan before an approved apply. Exactly 2 × `m7i-flex.large` nodes.
 5. **EBS CSI & Storage Setup**: Connect `kubectl` (`aws eks update-kubeconfig --region eu-north-1 --name votex-cluster`) and run `bash terraform/scripts/post_apply.sh` to initialize gp3 storage and verify IRSA roles.
 6. **AWS Load Balancer Controller**: Deploy AWS Load Balancer Controller with its dedicated IAM Role for Service Accounts (IRSA) to manage shared ALB ingress.
 
@@ -272,7 +278,9 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
    ```
 8. **Prometheus, Grafana, Loki & Alloy**: Deploy the full monitoring and logging stack using `kube-prometheus-stack`:
    ```bash
-   # Create Grafana admin credentials secret (avoids hardcoded passwords)
+   # Create monitoring namespace before its Secret
+   kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+   # Create Grafana admin credentials Secret from approved inputs
    kubectl create secret generic grafana-admin-credentials -n monitoring \
      --from-literal=admin-user=admin \
      --from-literal=admin-password="<STRONG_PASSWORD>"
@@ -299,21 +307,50 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
    ```
 
 ### Phase C: Ingress, Security & Pipeline Execution
-10. **Domain, ACM & HTTPS Ingress**: Register Route 53 alias records pointing to the ALB. Issue an ACM TLS certificate for public hostnames (`vote.domain.tld`, `result.domain.tld`, `grafana.domain.tld`, `jenkins.domain.tld`, `sonarqube.domain.tld`).
+10. **Domain, ACM & HTTPS Ingress**: Obtain verified operator-owned hostnames and an issued ACM certificate in `eu-north-1`. The application Ingress is intentionally disabled in `values-eks.yaml`. Once domains/certificate exist, use an untracked deployment-only override (run from repository root) to enable Vote and Result HTTPS:
+   ```bash
+   export VOTE_HOST="vote.example.com"
+   export RESULT_HOST="result.example.com"
+   export ACM_CERT_ARN="arn:aws:acm:eu-north-1:ACCOUNT:certificate/CERTIFICATE_ID"
+   cat > /tmp/votex-https-values.yaml <<EOF
+   ingress:
+     enabled: true
+     annotations:
+       alb.ingress.kubernetes.io/certificate-arn: "${ACM_CERT_ARN}"
+     hosts:
+       - host: "${VOTE_HOST}"
+         paths:
+           - path: /
+             pathType: Prefix
+             service: vote
+       - host: "${RESULT_HOST}"
+         paths:
+           - path: /
+             pathType: Prefix
+             service: result
+   EOF
+   OTEL_ROLE="$(terraform -chdir=terraform output -raw otel_collector_role_arn)"
+   helm upgrade --install votex ./k8s/helm/votex \
+     -f ./k8s/helm/votex/values-eks.yaml \
+     -f /tmp/votex-https-values.yaml \
+     --set otel.collector.serviceAccount.roleArn="$OTEL_ROLE" \
+     --namespace votex --rollback-on-failure
+   ```
+   Replace placeholder hostnames in Jenkins/SonarQube/Grafana manifests with owned DNS names and validate authentication/access controls before public exposure. Do not deploy placeholder ACM ARNs or domains.
 11. **Credentials & Authentication**: Store Jenkins credentials (`dockerhub-credentials`, `k8s-kubeconfig`, `sonarqube-token`) in the Jenkins credential store.
 12. **Jenkins 9-Stage Pipeline Execution**: Trigger declarative pipeline on `main`. Executes all 9 stages: Checkout, Build & Smoke Validation, SonarQube SAST, Trivy Filesystem, Docker Build, Trivy Image, OWASP ZAP DAST, Docker Hub Publish, and EKS Deploy & Verification.
 
 ### Phase D: Operational Verification & Evidence
 13. **Load Testing & HPA Verification**: Run k6 traffic generation against the live ingress URL:
     ```bash
-    VOTEX_URL="https://vote.votex.domain.tld" k6 run tests/load/load-test.js
+    TARGET_URL="https://vote.votex.domain.tld" k6 run tests/load/load-test.js
     kubectl get hpa -n votex --watch
     ```
 14. **Chaos Resilience Verification**: Execute controlled pod restart self-healing proof:
     ```bash
-    bash tests/resilience/chaos-test.sh --confirm
+    AWS_ACCOUNT_ID="<YOUR_ACCOUNT_ID>" bash tests/resilience/chaos-test.sh --confirm
     ```
-15. **Lambda Alarms Verification**: Deploy synthetic canary via `terraform apply -target=module.lambda_monitoring` with live URLs and inspect CloudWatch alarms in the AWS console.
+15. **Lambda Alarms Verification**: After configuring real HTTPS health URLs, set `enable_health_check_lambda=true`, `vote_health_url` and `result_health_url`; review a full Terraform plan and separately authorize apply. The correct module is `module.lambda`. Verify EventBridge and CloudWatch alarms live.
 16. **Ansible Disaster Recovery Verification**: Execute automated logical database backup and isolated restore verification:
     ```bash
     ansible-playbook -i ansible/inventory/hosts.ini.example ansible/backup_restore_verify.yml
@@ -323,7 +360,7 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
 19. **Evidence Capture**: Gather screenshots, metrics snapshots, and pipeline logs into `reports/` for audit documentation.
 20. **Safe Cloud Teardown**: Decommission all live AWS resources to prevent lingering charges:
     ```bash
-    ./ops/destroy.sh
+    EXPECTED_AWS_ACCOUNT_ID="<YOUR_ACCOUNT_ID>" ./ops/destroy.sh
     ```
 
 ---
