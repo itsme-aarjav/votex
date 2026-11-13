@@ -109,25 +109,26 @@ The emphasis is on **delivery engineering and operational proof**, rather than s
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    User["Browser / User"]
-    ALB["HTTPS · ACM · AWS ALB"]
-    Vote["Flask Vote API"]
-    Redis[(Redis Streams)]
-    Worker["Python Worker"]
-    PG[(PostgreSQL · EBS gp3)]
-    Result["Node.js Result API"]
+The Votex platform architecture illustrates the complete AWS infrastructure, automated 9-stage DevSecOps CI/CD pipeline, distributed microservices runtime on Amazon EKS, unified observability stack, and operational resilience workflows:
 
-    User --> ALB
-    ALB --> Vote
-    ALB --> Result
-    Vote -->|XADD| Redis
-    Redis -->|XREADGROUP / XAUTOCLAIM| Worker
-    Worker -->|Idempotent UPSERT| PG
-    PG -->|Aggregate results| Result
-    Result -.->|Socket.IO updates| User
-```
+<p align="center">
+  <a href="docs/images/votex-platform-architecture.png">
+    <img src="docs/images/votex-platform-architecture.png" alt="VOTEX Platform Architecture — Cloud-Native DevSecOps Platform on AWS EKS" width="100%" />
+  </a>
+</p>
+
+<p align="center">
+  <em>Figure 1: Comprehensive architectural overview of the Votex platform spanning CI/CD, AWS foundation, EKS microservices runtime, observability, and operational automation. Click image to view in full resolution.</em>
+</p>
+
+> [!NOTE]
+> **Implementation Notes & Architectural Precision**
+> The infographic provides a unified conceptual overview of the platform. The exact production parameters implemented in code and verified live on AWS are:
+> - **VPC Subnet Allocation**: Public subnets are `10.0.1.0/24` and `10.0.2.0/24`; private worker subnets are `10.0.11.0/24` and `10.0.12.0/24` across two availability zones (`eu-north-1a` and `eu-north-1b`).
+> - **Kubernetes HPA Targeting**: Horizontal Pod Autoscaling is configured exclusively for the web-facing `vote` and `result` deployments based on CPU utilization; the `worker` service runs as a dedicated singleton queue consumer to avoid consumer group partition contention.
+> - **Health Endpoints & Routing**: Application health probes are standardized at `/api/health`. Public microservices are accessed via dedicated subdomains (`vote.votex.aarjav.site` and `result.votex.aarjav.site`) sharing a single Application Load Balancer via Ingress grouping (`alb.ingress.kubernetes.io/group.name: "votex-platform"`).
+> - **Synthetic Monitoring**: AWS Lambda executes synthetic availability canaries every 5 minutes scheduled via Amazon EventBridge, emitting custom CloudWatch metrics and driving 3 alarm conditions (`OK` state).
+> - **Infrastructure Lifecycle**: Following the live evaluation, all AWS infrastructure was completely torn down with zero remaining cloud assets (certified in [`proofs/aws/aws-teardown-verification.txt`](proofs/aws/aws-teardown-verification.txt)).
 
 | Component | Responsibility | Source |
 | --- | --- | --- |
