@@ -4,7 +4,7 @@ This directory contains the verified, authentic evidence demonstrating the live 
 
 > [!IMPORTANT]
 > - **All screenshots are 100% genuine and personally captured by the project owner.** No automated or synthetic browser captures were used.
-> - **AWS infrastructure remains live pending user-approved teardown.** The environment runs on an active EKS cluster (Kubernetes 1.36) with 2 × `m7i-flex.large` worker nodes.
+> - **AWS infrastructure was cleanly decommissioned on explicit owner authorization.** All compute, storage, networking, and DNS resources were torn down (verified in [`aws/aws-teardown-verification.txt`](aws/aws-teardown-verification.txt)), eliminating ongoing cloud charges while permanently preserving all 26 dashboard screenshots and technical evidence.
 
 ---
 
@@ -44,15 +44,15 @@ Where terminal testing or scanner outputs provide the definitive engineering pro
 - [`helm-release-history.txt`](operations/helm-release-history.txt): Audit trail of Helm revisions 1 to 14 documenting automated rollbacks (revisions 9 and 12).
 - [`kubernetes-hpa.txt`](operations/kubernetes-hpa.txt): Live HPA describe output and engineering analysis.
 
-### D. Cloud Infrastructure & Cost Model
+### D. Cloud Infrastructure (Terraform Backend & Teardown Verification)
 - [`terraform-resources.txt`](aws/terraform-resources.txt): Managed resource list from the remote S3 state backend (36 provisioned resources).
-- [`aws-cost-and-runtime-audit.txt`](aws/aws-cost-and-runtime-audit.txt): Cost breakdown based on AWS hourly pricing for Stockholm, elapsed runtime hours, and budget margin.
+- [`aws-teardown-verification.txt`](aws/aws-teardown-verification.txt): Post-demonstration infrastructure teardown verification, certifying all 45 Terraform-managed cloud resources, 7 EBS CSI storage volumes, 5 Route 53 DNS records, the versioned S3 Terraform state bucket, and CloudWatch log groups were permanently decommissioned with zero remaining billable assets.
 
 ---
 
 ## 3. Genuine Production Dashboard Screenshots
 
-All visual dashboards are verified by **22 owner-captured screenshots** organized in [`screenshots/`](screenshots/):
+All visual dashboards are verified by **26 owner-captured screenshots** organized in [`screenshots/`](screenshots/):
 
 | Category | Retained Screenshots | Key Visible Insights |
 | :--- | :--- | :--- |
@@ -60,14 +60,16 @@ All visual dashboards are verified by **22 owner-captured screenshots** organize
 | [`screenshots/ci-cd/`](screenshots/ci-cd/) | 3 files (`jenkins-pipeline-stageview.png`, `jenkins-trivy-artifacts.png`, `jenkins-zap-artifacts.png`) | Jenkins pipeline 9-stage green dashboard and archived security scan directories. |
 | [`screenshots/security/`](screenshots/security/) | 5 files (`sonarqube-quality-gate.png`, `sonarqube-overall-measures.png`, `sonarqube-code-metrics.png`, etc.) | SonarQube Quality Gate status (**OK**), 22 hotspots, 111 smells, 9 minor bugs, and per-component line counts. |
 | [`screenshots/observability/`](screenshots/observability/) | 7 files (`grafana-cluster-cpu-memory.png`, `grafana-cluster-network.png`, `grafana-node-metrics.png`, `grafana-pod-*.png`, `grafana-loki-logs.png`, `aws-xray-service-map.png`) | Live host CPU/RAM, network bandwidth, container working set memory, Loki log streams, and X-Ray trace map. |
-| [`screenshots/aws/`](screenshots/aws/) | 5 files (`aws-eks-cluster-overview.png`, `aws-eks-cluster-resources.png`, `aws-vpc-configuration.png`, `aws-lambda-*.png`) | AWS Management Console: Active EKS control plane (1.36), VPC details, Lambda synthetic monitor and metrics. |
+| [`screenshots/aws/`](screenshots/aws/) | 9 files (`aws-eks-*`, `aws-vpc-*`, `aws-lambda-*`, `aws-cloudwatch-*`) | AWS Management Console: Active EKS control plane (1.36), VPC details, Lambda synthetic health monitor & metrics, and CloudWatch Alarms (Vote, Result, and Overall synthetic health checks in OK state). |
 
 ---
 
 ## 4. Engineering Limitations & Missing Coverage
 
 To maintain technical authenticity, the following genuine limitations are documented:
-1. **Prometheus Native Targets Screenshot**: Not captured in the initial screenshot batch; Prometheus scrape health (23/23 UP) is evidenced via the Grafana Node Exporter and Cluster dashboards.
-2. **CloudWatch Alarms Console Screenshot**: Not captured; synthetic health check metrics are evidenced via Lambda CloudWatch metrics (100% success rate, 0 errors) and CLI outputs.
-3. **HPA Replica Scale-up**: While HPA actively samples metrics (`ScalingActive: True`), the baseline k6 load test (129 requests) did not breach the 70% CPU threshold; replica scale-up beyond 2/2 is unproven.
-4. **AWS Cost Explorer Lag**: AWS Cost Explorer has a 24-hour settlement lag; reported costs (~$1.88 USD / ~₹163.50 INR) represent real-time hourly model calculations based on AWS public pricing.
+1. **Prometheus Native Targets Screenshot**: Not captured in the screenshot batch; Prometheus scrape health (23/23 UP) is evidenced via the Grafana Node Exporter and Cluster dashboards.
+2. **HPA Replica Scale-out**: While HPA actively sampled metrics (`ScalingActive: True`), the baseline k6 load test (129 requests) did not breach the 70% CPU threshold; replica scale-up beyond 2/2 is unproven under load.
+3. **k6 Load Testing Scope**: Validated baseline functional load (129 votes, 903 checks passed, p95 272.7ms, 0% errors), not large-scale enterprise stress capacity.
+4. **PostgreSQL DR Scope**: Automated logical backup and isolated restore were verified (10/10 test rows) on the live cluster; off-cluster automated archival (e.g. streaming snapshots to an external S3 bucket) was not configured.
+5. **SonarQube Coverage & Code Health**: SonarQube reports 0.0% coverage on new code, 22 security hotspots, 9 minor bugs, and 111 code smells. While the Clean As You Code Quality Gate passed, the platform prioritizes deployment orchestration and pipeline gating over complete application unit test coverage.
+6. **Infrastructure Decommissioning**: 100% of AWS resources have been cleanly torn down; the evidence in this directory reflects historical demonstration verification.

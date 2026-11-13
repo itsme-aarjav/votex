@@ -2,13 +2,17 @@
 
 Votex is an enterprise 5-tier microservices polling and real-time analytics platform provisioned on Amazon EKS using modular Terraform and Helm 3. It demonstrates production-grade DevSecOps engineering with an automated 9-stage Jenkins declarative pipeline, SonarQube static code analysis, Trivy vulnerability scanning, OWASP ZAP dynamic application security testing, Prometheus/Grafana metrics, Grafana Alloy & Loki log aggregation, OpenTelemetry distributed tracing with AWS X-Ray, non-destructive Ansible PostgreSQL disaster recovery verification, and AWS Lambda external synthetic monitoring.
 
+> [!NOTE]
+> **Project Lifecycle State: Live Demonstration Completed & Infrastructure Decommissioned**
+> The Votex platform was provisioned on AWS (`eu-north-1`), fully verified through automated pipelines and live user-facing testing, and subsequently torn down to prevent ongoing cloud charges. All genuine tool-generated reports, test traces, and 26 production dashboard screenshots are preserved in [`proofs/`](proofs/). The final decommissioning record is documented in [`proofs/aws/aws-teardown-verification.txt`](proofs/aws/aws-teardown-verification.txt).
+
 ---
 
 ## 1. Application Interfaces & Architecture
 
 The application comprises a user-facing voting portal, an in-memory stream buffer, an asynchronous persistence worker daemon, and a live analytics dashboard:
 
-Vote is a Python/Flask interface; Result is a Node.js/Socket.IO analytics dashboard. Fresh live screenshots will be captured after the first AWS deployment.
+Vote is a Python/Flask polling interface ([vote-application.png](proofs/screenshots/application/vote-application.png)); Result is a Node.js/Socket.IO real-time analytics dashboard ([result-analytics-dashboard.png](proofs/screenshots/application/result-analytics-dashboard.png)).
 
 ### Microservices Data Flow
 
@@ -46,7 +50,7 @@ Vote is a Python/Flask interface; Result is a Node.js/Socket.IO analytics dashbo
 
 Every commit to `main` executes an automated, 9-stage declarative Jenkins pipeline running on ephemeral Kubernetes agents inside the EKS cluster:
 
-Live Jenkins pipeline evidence will be captured during the approved AWS demo.
+Automated continuous integration and delivery was verified on live EKS agents in [Jenkins Build #16](proofs/ci-cd/jenkins-build-16-pipeline.json) (SUCCESS, duration: 452s), with pipeline and security artifacts documented in [CI/CD Screenshots](proofs/screenshots/ci-cd/).
 
 ### The 9 Pipeline Stages & Security Gates
 
@@ -77,6 +81,17 @@ Live Jenkins pipeline evidence will be captured during the approved AWS demo.
 > [!NOTE]
 > Application unit and integration test results were independently verified offline before pre-deployment workspace cleanup. CI Stage 2 executes standalone syntax, import, dependency, and process smoke checks, ensuring deterministic, hermetic pipeline builds on clean repository checkouts.
 
+### Security Testing Results & Findings
+
+The DevSecOps pipeline enforces automated security gates at multiple delivery stages, with genuine scan findings preserved in [`proofs/security/`](proofs/security/):
+
+| Security Scanner | Stage | Policy & Gate Enforced | Actual Live Scan Findings | Evidence Link |
+| :--- | :--- | :--- | :--- | :--- |
+| **SonarQube SAST** | Stage 3 | Clean As You Code (CAYC) Quality Gate | **Quality Gate: PASSED**<br>• Security Hotspots: 22<br>• Bugs: 9<br>• Code Smells: 111<br>• Coverage: 0.0% (unit tests executed offline) | [Quality Gate](proofs/screenshots/security/sonarqube-quality-gate.png)<br>[Measures](proofs/screenshots/security/sonarqube-overall-measures.png) |
+| **Trivy Filesystem** | Stage 4 | Zero tolerance for `HIGH` or `CRITICAL` CVEs in app & dependency trees | **0 High, 0 Critical** vulnerabilities under configured policy (Exit Code 0) | [Trivy Console Trace](proofs/security/trivy-fs-scan-console.txt) |
+| **Trivy Image Scan** | Stage 6 | Zero tolerance for `CRITICAL` CVEs in container base and package layers | **0 High, 0 Critical** in Vote, Result, and Worker images under configured scan policy | [Vote Scan](proofs/security/trivy-image-vote-scan.txt)<br>[Result Scan](proofs/security/trivy-image-result-scan.txt)<br>[Worker Scan](proofs/security/trivy-image-worker-scan.txt) |
+| **OWASP ZAP DAST** | Stage 7 | Baseline dynamic scan against live container HTTP endpoints | **0 High, 0 Critical**<br>• Medium: 3 alert types<br>• Low: 6 alert types<br>• Informational: 2 alert types | [Interactive HTML](proofs/security/zap-report.html)<br>[Raw JSON Data](proofs/security/zap-report.json) |
+
 ### Centralized Live Operational Proofs Repository
 
 All genuine tool-generated reports, vulnerability findings, terminal test outputs, and AWS infrastructure states produced during the live AWS deployment (verified through Jenkins builds #16 and #17) are preserved in [`proofs/`](proofs/):
@@ -84,8 +99,8 @@ All genuine tool-generated reports, vulnerability findings, terminal test output
 - [`proofs/security/`](proofs/security/): Raw Trivy scanner reports (FS console excerpt & 3 container images: 0 High/Critical) and raw OWASP ZAP DAST artifacts (`zap-report.html` and `zap-report.json`).
 - [`proofs/ci-cd/`](proofs/ci-cd/): Jenkins Build #16 pipeline execution metadata (9/9 stages SUCCESS), Ansible post-deployment verification.
 - [`proofs/operations/`](proofs/operations/): k6 load testing (903 checks passed, 129 votes, p95 272ms), Chaos pod self-healing logs (Worker 5s, Redis 7s), PostgreSQL non-destructive DR restore verification, Helm release history (Revisions 1–14), and Kubernetes HPA describe analysis.
-- [`proofs/aws/`](proofs/aws/): Terraform managed resources list (36 resources) and live AWS cost & runtime audit.
-- [`proofs/screenshots/`](proofs/screenshots/): 22 genuine production dashboard screenshots personally captured by the owner across `application/`, `ci-cd/`, `security/`, `observability/`, and `aws/`.
+- [`proofs/aws/`](proofs/aws/): Terraform managed resources list (36 resources) and post-teardown verification record.
+- [`proofs/screenshots/`](proofs/screenshots/): 26 genuine production dashboard screenshots personally captured by the owner across `application/`, `ci-cd/`, `security/`, `observability/`, and `aws/`.
 
 ---
 
@@ -126,9 +141,9 @@ The platform avoids duplicate pipelines by maintaining strict boundaries across 
 
 ## 4. AWS Cloud Infrastructure (Option B — `eu-north-1`)
 
-All cloud infrastructure is provisioned through modular Terraform in `eu-north-1` (Stockholm):
+All cloud infrastructure was provisioned through modular Terraform in `eu-north-1` (Stockholm):
 
-Live EKS and EC2 node screenshots will be captured during the approved AWS demo.
+Provisioned infrastructure and Kubernetes resources are documented in [AWS Console Screenshots](proofs/screenshots/aws/).
 
 - **Isolated Custom VPC (`10.0.0.0/16`)**:
   - **2 Public Subnets** (`10.0.1.0/24`, `10.0.2.0/24`): Host the NAT Gateway and internet-facing Application Load Balancer.
@@ -170,6 +185,18 @@ Terraform 1.10+ introduced native S3 conditional writes. S3 natively supports co
 To avoid the circular dependency where an EKS stack attempts to manage the bucket required to store its own state:
 1. `terraform/bootstrap` is provisioned once to create the secure S3 state bucket.
 2. The main stack initializes against the provisioned bucket: `terraform init -backend-config="bucket=<BUCKET_NAME>"`.
+
+### S3 State Bucket Lifecycle: Operational vs. Final Decommission
+
+To provide a complete and honest audit trail, the lifecycle of the remote state storage reflects two distinct engineering phases:
+
+1. **Active Demonstration Lifecycle**:
+   - The state bucket (`votex-tfstate-592668326948-eu-north-1`) was bootstrapped with object versioning, server-side AES-256 encryption, and public access blocks.
+   - When executing the standard platform teardown (`ops/destroy.sh`), the script intentionally **preserves** the remote state bucket by design, ensuring state continuity and diagnostic auditability.
+2. **Final Owner-Authorized Decommissioning**:
+   - Following project verification, the owner authorized the permanent deletion of the remaining cloud assets.
+   - All **45 historical object versions** and **34 delete markers** were purged via batch API calls, and the bucket was destroyed using `terraform/bootstrap destroy`.
+   - Verified 404 (`NoSuchBucket`) in [`proofs/aws/aws-teardown-verification.txt`](proofs/aws/aws-teardown-verification.txt).
 
 ---
 
@@ -245,11 +272,21 @@ Used when Terraform partially provisions cloud infrastructure (such as VPC, Subn
 - **Human Approval Gate**: Inspects the exact `terraform plan -destroy` and requires explicit confirmation (`confirm-partial-recovery-destroy`).
 - **Preserves S3 State Bucket & Evidence**: Deletes billable orphaned resources (VPC, NAT Gateways, IAM), verifies state emptiness, audits cloud footprint, and preserves the remote S3 state bucket and diagnostic logs.
 
+### C. Final Owner-Authorized Decommissioning & S3/Logs Purge
+
+While `ops/destroy.sh` safely decommissions the live compute, networking, and cluster workloads while preserving the S3 backend, the project owner authorized a final, permanent cleanup step to leave zero remaining cloud footprint:
+
+1. **Route 53 DNS Record Deletion**: Exactly 5 CNAME records (`vote`, `result`, `jenkins`, `sonarqube`, `grafana.votex.aarjav.site`) pointing to the ALB were deleted and confirmed `INSYNC` in Route 53 hosted zone `Z03613601CUCUEOYY4ZU2`.
+2. **S3 Bucket Multi-Version Purge**: All 45 historical `.tfstate` and `.tflock` object versions and 34 delete markers were permanently removed via S3 batch API calls.
+3. **Bootstrap S3 Destruction**: The empty state bucket was destroyed via `terraform/bootstrap destroy`, confirmed absent (`404 Not Found`).
+4. **CloudWatch Log Cleanup**: The `/aws/lambda/votex-cluster-synthetic-health-check` log group was deleted.
+5. **Zero Cloud Footprint Verified**: Live AWS API queries confirm zero running instances, zero NAT gateways, zero load balancers, zero EBS volumes, and zero S3 buckets remaining. Full verification details are recorded in [`proofs/aws/aws-teardown-verification.txt`](proofs/aws/aws-teardown-verification.txt).
+
 ---
 
 ## 8. Deployment & Operational Runbook
 
-This guide documents the complete 20-step procedure for a future, explicitly authorized live AWS deployment:
+This runbook documents the complete 20-step lifecycle procedure executed during the live AWS deployment and subsequent decommissioning:
 
 ```
 [1. AWS Preflight] ──> [2. S3 Bootstrap] ──> [3. TF Init] ──> [4. EKS Provision]
@@ -382,14 +419,15 @@ This guide documents the complete 20-step procedure for a future, explicitly aut
 
 ---
 
-## 9. What Requires a Live Approved AWS Deployment
+## 9. Live AWS Demonstration & Verification Scope
 
-The following operational validations require an active, authorized AWS session with registered domain infrastructure:
-1. **Public Domain DNS**: Registering an `A` record alias in Route 53 pointing to the AWS ALB.
-2. **ACM Public Certificate**: Issuing an AWS Certificate Manager TLS certificate for HTTPS termination.
-3. **Live ALB Provisioning**: Launching the AWS Load Balancer Controller to bind the ALB.
-4. **Live EventBridge & CloudWatch Alarm Evaluation**: Verifying the Lambda synthetic health check alarms on AWS console.
-5. **Live Distributed Trace Rendering**: Visualizing complete multi-service traces in AWS X-Ray service maps.
+The following operational capabilities were provisioned, tested live on AWS (`eu-north-1`), and documented before teardown:
+1. **Public Domain DNS**: Route 53 CNAME records (`vote`, `result`, `jenkins`, `sonarqube`, `grafana.votex.aarjav.site`) mapped to the Application Load Balancer.
+2. **ACM Public Certificate**: AWS Certificate Manager TLS certificate terminating HTTPS on port 443.
+3. **Live ALB Ingress**: AWS Load Balancer Controller managing multi-service path routing on a single shared ALB.
+4. **Synthetic Health Monitoring**: AWS Lambda invoked every 5 minutes by Amazon EventBridge, recording metrics to CloudWatch Alarms (Vote, Result, and Overall in `OK` state, verified in [`aws-cloudwatch-alarms-overview.png`](proofs/screenshots/aws/aws-cloudwatch-alarms-overview.png)).
+5. **Distributed Tracing**: End-to-end request tracing across Vote, Redis Streams, Worker, and PostgreSQL rendered in AWS X-Ray service maps ([`aws-xray-service-map.png`](proofs/screenshots/observability/aws-xray-service-map.png)).
+6. **Clean Decommissioning**: Full infrastructure and storage teardown with zero lingering cloud assets ([`aws-teardown-verification.txt`](proofs/aws/aws-teardown-verification.txt)).
 
 ---
 
@@ -406,20 +444,36 @@ The platform enforces strict container security standards while transparently ad
 
 ## 11. Engineering Status & Verification Matrix
 
-| Component / Capability | Implementation State | Offline Validation Status | Live AWS Requirement | Verification State |
-| :--- | :---: | :---: | :--- | :---: |
-| **VPC & EKS Node Infrastructure** | Implemented (`terraform/`) | `terraform validate`, `plan` (33 adds) | AWS account, VPC, EKS cluster creation | Pending authorization |
-| **Microservices (Vote, Result, Worker)** | Implemented (`votex/`) | Unit, reliability, and service smoke checks verified offline | EKS cluster, Docker images pulled | Offline Validated |
-| **Redis & PostgreSQL Storage** | Implemented (`k8s/helm/votex`) | Helm template & linting valid | AWS EBS gp3 dynamic volume attachment | Offline Validated |
-| **Jenkins 9-Stage CI/CD** | Implemented (`jenkins/Jenkinsfile`) | Syntax, POSIX shell check, container image validated | EKS Kubernetes cloud, SonarQube token, Docker Hub credentials | Offline Validated |
-| **Prometheus & Grafana Monitoring** | Implemented (`k8s/monitoring/`) | Values linted, Helm chart render validated | EKS cluster, EBS gp3 PVCs | Offline Validated |
-| **Grafana Alloy & Loki Logging** | Implemented (`k8s/monitoring/`) | River config syntax checked (`alloy fmt`), chart templated | DaemonSet scheduling on live EC2 nodes | Offline Validated |
-| **OpenTelemetry & AWS X-Ray** | Implemented (Vote, Worker, Helm) | Helm template with IRSA role ARN validated | AWS X-Ray IAM permissions, OTel collector daemon | Offline Validated |
-| **PostgreSQL Backup & Restore** | Implemented (`ansible/`) | `ansible-playbook --syntax-check` validated | Active PostgreSQL pod in `votex` namespace | Offline Validated |
-| **Resilience & Chaos Testing** | Implemented (`tests/resilience/`) | `bash -n` syntax checked, safety flags enforced | Running cluster with replica deployments | Offline Validated |
-| **Load Testing (k6)** | Implemented (`tests/load/`) | `node --check` syntax checked, custom metrics valid | Live ALB URL with ingress routing | Offline Validated |
-| **AWS Lambda Synthetic Canary** | Implemented (`terraform/modules/lambda/`, `lambda/health_check/handler.py`) | Pytest syntax & handler invocation verified | Live public URL, EventBridge rule, CloudWatch alarm | Offline Validated |
-| **Automated Teardown Script** | Implemented (`ops/destroy.sh`) | `bash -n` syntax checked, safety checks verified | Live cluster resources to query and delete | Offline Validated |
+| Subsystem / Capability | Implementation Architecture | Demonstration & Testing Outcome | Current Status | Supporting Evidence |
+| :--- | :--- | :--- | :---: | :--- |
+| **Terraform VPC & EKS** | Modular Terraform in `eu-north-1` (`10.0.0.0/16`, 2 public/2 private subnets, 2 × `m7i-flex.large` nodes) | Live provisioned, verified, and cleanly decommissioned via Terraform | **Teardown Completed** | [`terraform-resources.txt`](proofs/aws/terraform-resources.txt)<br>[`aws-teardown-verification.txt`](proofs/aws/aws-teardown-verification.txt)<br>[`aws-eks-cluster-overview.png`](proofs/screenshots/aws/aws-eks-cluster-overview.png) |
+| **Microservices (Vote, Result, Worker)** | Python Flask web portal, Redis Stream buffer, Python consumer daemon, Node.js WebSocket dashboard | Deployed via Helm 3, live vote submissions processed and broadcast | **Implemented and live verified** | [`vote-application.png`](proofs/screenshots/application/vote-application.png)<br>[`result-analytics-dashboard.png`](proofs/screenshots/application/result-analytics-dashboard.png) |
+| **PostgreSQL & Redis Storage** | Stateful storage backed by AWS EBS gp3 PVCs via EBS CSI driver | Verified live under pod kill chaos; Redis remounted EBS gp3 in 7s without data loss | **Tested with evidence** | [`chaos-resilience-test-log.txt`](proofs/operations/chaos-resilience-test-log.txt) |
+| **Jenkins 9-Stage CI/CD** | Ephemeral Kubernetes build agents, declarative `Jenkinsfile`, automated SCM polling | 9/9 stages completed with status `SUCCESS` in 452s (Build #16) | **Pipeline SUCCESS** | [`jenkins-build-16-pipeline.json`](proofs/ci-cd/jenkins-build-16-pipeline.json)<br>[`jenkins-pipeline-stageview.png`](proofs/screenshots/ci-cd/jenkins-pipeline-stageview.png) |
+| **SonarQube SAST** | SonarScanner integration with Clean As You Code quality gate enforcement | Quality Gate: PASSED; 22 hotspots, 9 bugs, 111 smells, 0% coverage | **Demonstrated with limitations** | [`sonarqube-quality-gate.png`](proofs/screenshots/security/sonarqube-quality-gate.png)<br>[`sonarqube-overall-measures.png`](proofs/screenshots/security/sonarqube-overall-measures.png) |
+| **Trivy Vulnerability Scanner** | Filesystem and container image scanning in CI pipeline | Zero tolerance gate passed: 0 High, 0 Critical findings under policy | **Tested with evidence** | [`trivy-fs-scan-console.txt`](proofs/security/trivy-fs-scan-console.txt)<br>[`trivy-image-vote-scan.txt`](proofs/security/trivy-image-vote-scan.txt) |
+| **OWASP ZAP DAST** | Dynamic web vulnerability scanner against container HTTP endpoints | 0 High, 0 Critical; 3 Medium, 6 Low, 2 Informational alert types | **Tested with evidence** | [`zap-report.html`](proofs/security/zap-report.html)<br>[Raw JSON](proofs/security/zap-report.json) |
+| **Prometheus & Grafana Metrics** | `kube-prometheus-stack` with Node Exporter and kube-state-metrics | Cluster CPU (3%), memory (38%), and host node metrics live monitored | **Implemented and live verified** | [`grafana-cluster-cpu-memory.png`](proofs/screenshots/observability/grafana-cluster-cpu-memory.png)<br>[`grafana-node-metrics.png`](proofs/screenshots/observability/grafana-node-metrics.png) |
+| **Grafana Alloy & Loki Logs** | Single-binary Loki store with Alloy DaemonSet container log scraper | Ingested live `{namespace="votex"}` container logs without Promtail | **Implemented and live verified** | [`grafana-loki-logs.png`](proofs/screenshots/observability/grafana-loki-logs.png) |
+| **OpenTelemetry & AWS X-Ray** | OTel Python SDK with X-Ray ID generator, OTel Collector daemon | Live distributed spans across HTTP, Redis, Worker, and DB mapped | **Implemented and live verified** | [`aws-xray-service-map.png`](proofs/screenshots/observability/aws-xray-service-map.png) |
+| **Lambda, EventBridge & CloudWatch** | External synthetic canary invoked every 5 min by EventBridge | 100% invocation success, ~300ms latency, all 3 alarms in OK state | **Implemented and live verified** | [`aws-lambda-monitoring-metrics.png`](proofs/screenshots/aws/aws-lambda-monitoring-metrics.png)<br>[`aws-cloudwatch-alarms-overview.png`](proofs/screenshots/aws/aws-cloudwatch-alarms-overview.png) |
+| **PostgreSQL Disaster Recovery** | Ansible automated logical dump and non-destructive restore | `ansible/backup_restore_verify.yml`: 10/10 test rows verified | **Tested with evidence** | [`ansible-disaster-recovery-log.txt`](proofs/operations/ansible-disaster-recovery-log.txt) |
+| **k6 Load Testing** | Synthetic traffic with configurable profiles, cookies, and CSRF handling | 903/903 checks passed, 129 votes, p95: 272.7ms, 0% HTTP errors | **Tested with evidence** | [`k6-load-test-summary.txt`](proofs/operations/k6-load-test-summary.txt) |
+| **Horizontal Pod Autoscaling (HPA)** | Kubernetes HPA targeting CPU utilization on Vote and Result | Metrics server active, baseline load did not exceed 70% CPU threshold | **Demonstrated with limitations** | [`kubernetes-hpa.txt`](proofs/operations/kubernetes-hpa.txt) |
+| **Complete AWS Teardown** | `ops/destroy.sh` + S3 multi-version purge + CloudWatch log deletion | 45 Terraform resources, 7 EBS volumes, 5 Route 53 records, S3 bucket deleted | **Teardown Completed** | [`aws-teardown-verification.txt`](proofs/aws/aws-teardown-verification.txt) |
+
+---
+
+## 12. Documented Engineering Limitations
+
+To maintain absolute technical authenticity and transparency, the following genuine engineering limitations are documented:
+
+1. **HPA Replica Scale-out**: Kubernetes HPA metric collection was verified active (`ScalingActive: True`), but the executed baseline k6 load test (129 votes) did not breach the 70% CPU threshold. Automatic horizontal pod replica expansion beyond the baseline 2/2 count was not demonstrated under load.
+2. **Load Testing Scope**: The recorded k6 load test validated baseline functional concurrency, CSRF token handling, and latency profiling (903 checks passed, p95: 272.7ms), rather than exhaustive large-scale enterprise stress capacity.
+3. **Database Disaster Recovery Architecture**: Ansible automated logical database backup and restore was verified with 100% row integrity against an isolated temporary database on the live cluster; off-cluster automated archival (such as streaming continuous backups to an external S3 bucket) was not configured.
+4. **Prometheus Native UI Evidence**: Prometheus scrape target health (23/23 targets `UP`) was verified and monitored through Grafana dashboards; a dedicated screenshot of the native Prometheus `/targets` web console was not captured during the demonstration.
+5. **SonarQube Code Coverage & Findings**: SonarQube reported 0.0% line coverage on new code along with 22 security hotspots, 9 minor bugs, and 111 code smells. While the Clean As You Code Quality Gate passed, these metrics reflect microservice orchestration and pipeline gate verification rather than exhaustive application unit test suites.
+6. **Infrastructure Decommissioning**: 100% of the AWS infrastructure was intentionally torn down at the conclusion of testing to eliminate ongoing cloud charges. No live endpoints or cloud resources remain online.
 
 ---
 

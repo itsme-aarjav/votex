@@ -1,0 +1,148 @@
+================================================================================
+VOTEX PLATFORM — AWS INFRASTRUCTURE TEARDOWN & DECOMMISSIONING RECORD
+================================================================================
+Initial Teardown Timestamp: 2026-11-13T04:10:00+05:30 (2026-11-12T22:40:00Z)
+Final S3/Logs Deletion:     2026-11-13T04:24:00+05:30 (2026-11-12T22:54:00Z)
+AWS Account ID:             592668326948
+AWS Target Region:          eu-north-1 (Stockholm)
+EKS Cluster Name:           votex-cluster
+Execution Workflows:        ops/destroy.sh (Main Infrastructure Teardown)
+                            terraform/bootstrap (S3 State Bucket Destruction)
+                            AWS CLI / Python SDK (Route 53 & CloudWatch Purge)
+Authorization:              Explicit Owner Authorization
+Overall Status:             SUCCESS — 100% Decommissioned (Zero Remaining Cloud Resources)
+
+--------------------------------------------------------------------------------
+1. TERRAFORM MAIN INFRASTRUCTURE DESTRUCTION
+--------------------------------------------------------------------------------
+Plan Result:            45 resources destroyed, 0 added, 0 changed
+Apply Status:           SUCCESS (Exit Code 0)
+Managed State Count:    0 resources remaining (terraform state list verified empty)
+State Lock:             Released successfully
+
+Destroyed Resource Inventory:
+  - module.eks.aws_eks_cluster.main
+  - module.eks.aws_eks_node_group.nodes (2 x m7i-flex.large)
+  - module.eks.aws_launch_template.eks_nodes
+  - module.eks.aws_eks_addon.vpc_cni
+  - module.eks.aws_eks_addon.kube_proxy
+  - module.eks.aws_eks_addon.coredns
+  - module.eks.aws_eks_addon.aws_ebs_csi
+  - module.eks.aws_iam_openid_connect_provider.eks
+  - module.eks.aws_iam_role.eks_cluster
+  - module.eks.aws_iam_role.eks_nodes
+  - module.eks.aws_iam_role.aws_lb_controller_irsa
+  - module.eks.aws_iam_role.ebs_csi_irsa
+  - module.eks.aws_iam_role.otel_collector_irsa
+  - module.eks.aws_iam_policy.aws_lb_controller
+  - module.eks.aws_iam_role_policy_attachment (7 attachments)
+  - module.lambda.aws_lambda_function.health_check[0]
+  - module.lambda.aws_lambda_permission.allow_eventbridge[0]
+  - module.lambda.aws_cloudwatch_event_rule.schedule[0]
+  - module.lambda.aws_cloudwatch_event_target.lambda_target[0]
+  - module.lambda.aws_cloudwatch_metric_alarm.overall_health_alarm[0]
+  - module.lambda.aws_cloudwatch_metric_alarm.service_health_alarm["result"]
+  - module.lambda.aws_cloudwatch_metric_alarm.service_health_alarm["vote"]
+  - module.lambda.aws_iam_role.lambda_exec[0]
+  - module.lambda.aws_iam_role_policy.lambda_policy[0]
+  - module.vpc.aws_vpc.main
+  - module.vpc.aws_nat_gateway.nat
+  - module.vpc.aws_eip.nat
+  - module.vpc.aws_internet_gateway.gw
+  - module.vpc.aws_subnet.public[0,1]
+  - module.vpc.aws_subnet.private[0,1]
+  - module.vpc.aws_route_table.public
+  - module.vpc.aws_route_table.private
+  - module.vpc.aws_route_table_association (4 associations)
+
+--------------------------------------------------------------------------------
+2. INDEPENDENT POST-DESTROY AWS API VERIFICATION
+--------------------------------------------------------------------------------
+[PASS] EKS Cluster:             ResourceNotFoundException (Verified Absent)
+[PASS] EKS Node Group:          Cluster/NodeGroup Not Found (Verified Absent)
+[PASS] EC2 Worker Instances:    i-0c591869530c27649: terminated
+                                i-0e2d5e299e0333ccb: terminated
+                                0 active instances remaining
+[PASS] NAT Gateway:             0 active/pending NAT gateways remaining
+[PASS] Elastic IP:              Allocation eipalloc-0366f2720c59a6c3b released
+[PASS] Application Load Balancer: All ingress ALBs deleted by controller
+                                0 Votex ALBs remaining in eu-north-1
+[PASS] ELBv2 Target Groups:     0 Votex target groups remaining
+[PASS] EBS CSI Volumes:         vol-0fcb10acb6e34ef60, vol-0272e8931b66dc9f6,
+                                vol-0d269d164cce3c9c8, vol-01996a79a78514c7f,
+                                vol-060034c488233b032, vol-07057e9a9729bcc46,
+                                vol-08f0f64b09b1bafe6
+                                All detached and verified deleted
+[PASS] Synthetic Lambda:        votex-cluster-synthetic-health-check: Absent
+[PASS] EventBridge Rule:        votex-cluster-health-check-rule: Absent
+[PASS] CloudWatch Alarms:       votex-cluster-*-health-failure: 0 alarms
+[PASS] Kubernetes Namespaces:   votex, jenkins, sonarqube, monitoring drained
+
+--------------------------------------------------------------------------------
+3. ROUTE 53 DNS CLEANUP VERIFICATION
+--------------------------------------------------------------------------------
+Hosted Zone ID:         Z03613601CUCUEOYY4ZU2 (aarjav.site)
+Change Batch Status:    INSYNC (Change ID: /change/C0029977O6XDH3IGMZXU)
+Deleted CNAME Records (Target: k8s-votexplatform-762d87ebd1-1742803884.eu-north-1.elb.amazonaws.com):
+  - vote.votex.aarjav.site.         [ABSENT]
+  - result.votex.aarjav.site.       [ABSENT]
+  - jenkins.votex.aarjav.site.      [ABSENT]
+  - sonarqube.votex.aarjav.site.    [ABSENT]
+  - grafana.votex.aarjav.site.      [ABSENT]
+
+Preserved Route 53 Records:
+  - aarjav.site (Apex A, AAAA, NS, SOA, TXT)
+  - www.aarjav.site (A, AAAA)
+  - portfolio.aarjav.site (CNAME -> Vercel)
+  - _2ed59829d667f974c0667849fcaf3bc4.aarjav.site (ACM validation)
+  - _75436909f644937626ac52156d8c7963.votex.aarjav.site (ACM certificate validation)
+
+--------------------------------------------------------------------------------
+4. S3 BUCKET & OBJECT VERSIONS PERMANENT DELETION
+--------------------------------------------------------------------------------
+S3 Bucket Name:         votex-tfstate-592668326948-eu-north-1
+Ownership & Tags:       Project=Votex, Environment=production, ManagedBy=Terraform-Bootstrap
+Decommission Workflow:  Permanent Multi-Version Batch Purge + Terraform Bootstrap Destroy
+Batch Deletion Summary:
+  - Object Versions Removed:  45 (including all historical .tfstate and .tflock versions)
+  - Delete Markers Removed:   34
+  - Deletion Errors:          0 (100% verified purge)
+Bootstrap Destroy Result:   Destroy complete! (4 bootstrap resources destroyed)
+  - aws_s3_bucket.terraform_state
+  - aws_s3_bucket_public_access_block.state_public_block
+  - aws_s3_bucket_server_side_encryption_configuration.state_encryption
+  - aws_s3_bucket_versioning.state_versioning
+Post-Deletion S3 Audit:     NoSuchBucket / 404 Not Found (Verified Absent via head-bucket API)
+Remaining S3 Buckets:       0 Votex S3 buckets in AWS account 592668326948
+
+--------------------------------------------------------------------------------
+5. CLOUDWATCH LOGS, DASHBOARDS & METRICS DECOMMISSIONING
+--------------------------------------------------------------------------------
+Deleted CloudWatch Log Group:
+  - /aws/lambda/votex-cluster-synthetic-health-check (0 stored bytes) -> DELETED
+Remaining Log Groups:   0 Votex log groups in eu-north-1 (describe-log-groups: [])
+CloudWatch Dashboards:  0 Votex dashboards in eu-north-1 (list-dashboards: [])
+CloudWatch Alarms:      0 Votex alarms in eu-north-1 (describe-alarms: [])
+Live Metric Publishers: 0 active publishers (Lambda and EventBridge verified absent)
+Historical Metrics Note:AWS CloudWatch metrics cannot be manually purged via API;
+                        they naturally expire under CloudWatch's automated rolling
+                        retention schedule with zero ongoing charges.
+
+--------------------------------------------------------------------------------
+6. FINAL COST & RUNTIME SETTLEMENT AUDIT
+--------------------------------------------------------------------------------
+Total Operational Uptime: ~5.6 hours
+Effective Hourly Run-Rate: ~$0.38 USD / hour
+  - 2 x m7i-flex.large EC2:  ~$0.2016 / hr
+  - EKS Control Plane:       ~$0.1000 / hr
+  - NAT Gateway:             ~$0.0520 / hr
+  - ALB:                     ~$0.0252 / hr
+  - EBS & Miscellaneous:     <$0.0050 / hr
+Estimated Total AWS Spend: ~$2.13 USD (~₹185 INR)
+Budget Ceiling:           ₹1,000 INR
+Budget Utilization:       ~18.5% (Over ₹815 INR headroom preserved)
+Ongoing Charges:          $0.00 / month (Zero active billable resources)
+Billing Note:             AWS Cost Explorer and billing console have up to 24-hour
+                          settlement lag. Real-time API audits confirm zero
+                          ongoing billable compute, network, or storage resources.
+================================================================================

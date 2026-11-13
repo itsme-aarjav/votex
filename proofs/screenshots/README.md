@@ -1,10 +1,10 @@
 # Votex — Production Dashboard Screenshots Portfolio
 
-All 22 screenshots in this directory were **personally captured by the project owner** from the live AWS production environment (`eu-north-1`).
+All 26 screenshots in this directory were **personally captured by the project owner** from the live AWS production environment (`eu-north-1`).
 
-- **Original Screenshots Captured**: 32
-- **Retained High-Value Evidence**: 22
-- **Removed Duplicate / Micro-Scrolls**: 10
+- **Original Screenshots Captured**: 36 (32 initial batch + 4 CloudWatch alarms batch)
+- **Retained High-Value Evidence**: 26
+- **Consolidated Duplicate / Micro-Scrolls**: 10
 
 ---
 
@@ -62,3 +62,7 @@ All 22 screenshots in this directory were **personally captured by the project o
 | [`aws-vpc-configuration.png`](aws/aws-vpc-configuration.png) | AWS VPC Console | VPC details (`vpc-0cad9e240f7ebfe9c`, `10.0.0.0/16`) showing multi-AZ public and private subnets. |
 | [`aws-lambda-synthetic-function.png`](aws/aws-lambda-synthetic-function.png) | AWS Lambda Console | Synthetic health check function (`votex-cluster-synthetic-health-check`), EventBridge trigger, and Python 3.11 code. |
 | [`aws-lambda-monitoring-metrics.png`](aws/aws-lambda-monitoring-metrics.png) | AWS Lambda Console → Monitoring | CloudWatch execution metrics: Continuous 5-minute invocations, ~300ms duration, 0 errors, 100% success rate. |
+| [`aws-cloudwatch-alarms-overview.png`](aws/aws-cloudwatch-alarms-overview.png) | AWS CloudWatch Console → Alarms | CloudWatch synthetic alarms overview in Stockholm (`eu-north-1`): 0 in alarm, 3 OK (`vote`, `result`, `overall` health failure alarms), 0 insufficient data. |
+| [`aws-cloudwatch-alarm-overall-health.png`](aws/aws-cloudwatch-alarm-overall-health.png) | AWS CloudWatch Console → Alarm Detail (`votex-cluster-overall-health-failure`) | Continuous OK graph and evaluation details for `OverallHealthStatus` under namespace `Votex/SyntheticMonitoring` (threshold < 1 for 2 datapoints). |
+| [`aws-cloudwatch-alarm-result-health.png`](aws/aws-cloudwatch-alarm-result-health.png) | AWS CloudWatch Console → Alarm Detail (`votex-cluster-result-health-failure`) | Continuous OK graph and metric details for `HealthCheckStatus` for the Result service (threshold < 1 for 2 datapoints within 10 minutes). |
+| [`aws-cloudwatch-alarm-vote-health.png`](aws/aws-cloudwatch-alarm-vote-health.png) | AWS CloudWatch Console → Alarm Detail (`votex-cluster-vote-health-failure`) | Continuous OK graph, datapoint tooltip (`HealthCheckStatus: 1`), and evaluation details for the Vote service synthetic health check. |
